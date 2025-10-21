@@ -100,9 +100,44 @@ def read_csv(path: str) -> pd.DataFrame:
 
 
 def extract_network(item: Dict[str, Any]) -> str:
+    """提取Network名称，优先使用network，没有则使用webChannel"""
     net = item.get("network") or {}
     web = item.get("webChannel") or {}
     return (net.get("name") or web.get("name") or "").strip()
+
+
+def extract_web_channel(item: Dict[str, Any]) -> str:
+    """提取Web Channel名称（独立列）"""
+    web = item.get("webChannel") or {}
+    return (web.get("name") or "").strip()
+
+
+def get_earliest_air_date(sess: requests.Session, show_id: int, exclude_specials: bool = True) -> Optional[str]:
+    """
+    从episodes API获取最早的首播日期
+    Args:
+        sess: requests session
+        show_id: 节目ID
+        exclude_specials: 是否排除特别篇（season 0）
+    Returns:
+        最早的首播日期字符串，格式：YYYY-MM-DD
+    """
+    url = f"{Config.BASE_URL}/shows/{show_id}/episodes"
+    data = safe_get_json(sess, url)
+    
+    if not data or not isinstance(data, list):
+        return None
+    
+    # 可选：排除特别篇 (season == 0 或 None)
+    if exclude_specials:
+        regular_episodes = [ep for ep in data if isinstance(ep.get("season"), int) and ep.get("season") > 0]
+        episodes = regular_episodes if regular_episodes else data
+    else:
+        episodes = data
+    
+    # 找出最早的airdate
+    dates = [ep.get("airdate") for ep in episodes if ep.get("airdate")]
+    return min(dates) if dates else None
 
 
 def format_genres(genres: List[str]) -> str:

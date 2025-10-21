@@ -43,13 +43,17 @@ tvmaze_crwal-main/
 | 列名 | 说明 | 示例 |
 |------|------|------|
 | Title | 节目名称 | "Breaking Bad" |
-| First air date | 首播日期 | "2008/01/20" |
+| First air date | 首播日期（从episodes API获取最早日期） | "2008/01/20" |
 | End date | 完结日期 | "2013/09/29" |
 | Rating | 评分 (0-10) | 9.3 |
 | Genres | 类型 (JSON) | ["Drama","Crime"] |
 | Status | 播出状态 | "Ended" |
-| Network | 电视网络 | "AMC" |
+| Network | 电视网络/网络频道 | "AMC" |
 | Summary | 剧情简介 | "A chemistry teacher..." |
+| **Web Channel** | 网络流媒体频道（新增） | "Netflix" |
+| **Language** | 节目语言（新增） | "English" |
+| **Runtime** | 单集时长（分钟）（新增） | 47 |
+| **Premiered Year** | 首播年份（新增） | "2008" |
 
 ### 可视化图表（7 幅）
 
@@ -105,8 +109,11 @@ class Config:
 | 要求 | 实现 |
 |------|------|
 | 抓取 ≥200 条数据 | ✅ 200 |
-| 包含 8 个必需列 | ✅ 完整 |
+| 包含 8 个必需列 | ✅ 完整（额外增加4列） |
 | 生成 ≥5 幅图表 | ✅ 7 幅 |
+| 使用Episodes API获取首播日期 | ✅ 支持 |
+| Network vs Web Channel | ✅ 独立列处理 |
+| Jupyter Notebook分析 | ✅ 包含Markdown文本分析 |
 | 代码规范 | ✅ 类型提示 + 工程化结构 |
 | 错误处理 | ✅ 重试机制 + 异常处理 |
 
