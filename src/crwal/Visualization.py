@@ -169,16 +169,10 @@ def run(csv_path: str, save_dir: str, topk: int = 20) -> None:
     ensure_dir(save_dir)
     df = read_csv(csv_path)
 
-    # 基础清洗：确保 Rating 为数值
     df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
 
-    # 1. Top-N 榜单
     fig_top_rated(df, k=topk, save_path=os.path.join(save_dir, f"top_{topk}_rated.png"))
-
-    # 2. 评分分布
     fig_rating_hist(df, bins=20, save_path=os.path.join(save_dir, "rating_hist.png"))
-
-    # 3. 不同状态均分
     fig_status_mean_rating(df, save_path=os.path.join(save_dir, "status_mean_rating.png"))
 
     # 4. 体裁均分 Top-10
