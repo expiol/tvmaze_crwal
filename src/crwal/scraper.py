@@ -76,7 +76,7 @@ def fetch_shows(count: int, fetch_newest: bool = True, filter_quality: bool = Tr
         logging.info("Fetching shows from page 260 down to 0...")
         
         # 从page 260开始，一直往前翻到page 0，直到收集到200条
-        start_page = 260
+        start_page = 340
         page = start_page
         
         # 从这些页面开始抓取
@@ -156,7 +156,7 @@ def fetch_episode_date_wrapper(args):
     return show_id, get_earliest_air_date(sess, show_id, exclude_specials=True)
 
 
-def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_api: bool = False) -> pd.DataFrame:
+def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_api: bool = True) -> pd.DataFrame:
     """转换原始数据为DataFrame"""
     episode_dates = {}
     
@@ -238,7 +238,7 @@ def run(count: int, out_path: str, log_file: str = None) -> pd.DataFrame:
         logging.error("No data fetched")
         raise RuntimeError("Failed to fetch data")
     
-    df = transform(items, sess, use_episodes_api=False)
+    df = transform(items, sess, use_episodes_api=True)
     save_csv(df, out_path)
     
     logging.info(f"SUCCESS: Saved {len(df)} rows to {out_path}")

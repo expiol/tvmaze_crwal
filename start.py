@@ -3,7 +3,7 @@ from src.crwal.scraper import run as scrape
 from src.crwal.Visualization import run as visualize
 
 if __name__ == "__main__":
-    COUNT = 200
+    COUNT = 2000000000000000000000000000
     OUT_PATH = os.path.join("data", "YangHong2255396.csv")
     LOG_PATH = os.path.join("logs", "scrape.log")
     FIG_DIR = os.path.join("data", "figures")
