@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -8,7 +7,6 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -17,27 +15,27 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+@dataclass(frozen=True)
+class Config:
+    BASE_URL: str = "https://api.tvmaze.com"
+    TIMEOUT: int = 15
+    SLEEP_AFTER_REQ: float = 0.6
+    MAX_RETRY: int = 3
+    BACKOFF: float = 0.5
+    SUMMARY_MAX_LEN: int = 280
 
-def setup_logging(log_file: Optional[str] = None, level: int = logging.INFO) -> None:
-    fmt = "[%(asctime)s] %(levelname)s - %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S"
+
+def setup_logging(log_file: Optional[str] = None) -> None:
     handlers: List[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     if log_file:
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
-    logging.basicConfig(format=fmt, datefmt=datefmt, level=level, handlers=handlers)
-
-
-
-@dataclass(frozen=True)
-class Config:
-    BASE_URL: str = "https://api.tvmaze.com"
-    TIMEOUT: int = 15  # seconds
-    SLEEP_AFTER_REQ: float = 0.6 
-    MAX_RETRY: int = 3
-    BACKOFF: float = 0.5  
-    SUMMARY_MAX_LEN: int = 280 
-
+    logging.basicConfig(
+        format="[%(asctime)s] %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=logging.INFO,
+        handlers=handlers
+    )
 
 
 def get_session() -> requests.Session:
@@ -57,39 +55,37 @@ def get_session() -> requests.Session:
     return sess
 
 
-def safe_get_json(sess: requests.Session, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    """GET with retry + simple rate throttle; return parsed JSON or None."""
+def safe_get_json(sess: requests.Session, url: str) -> Any:
     try:
-        resp = sess.get(url, params=params, timeout=Config.TIMEOUT)
+        resp = sess.get(url, timeout=Config.TIMEOUT)
         if resp.status_code == 200:
             return resp.json()
-        logging.warning("Non-200 response %s for %s", resp.status_code, resp.url)
+        logging.warning(f"Non-200 response {resp.status_code} for {resp.url}")
     except requests.RequestException as e:
-        logging.error("Request exception for %s: %s", url, e)
+        logging.error(f"Request exception for {url}: {e}")
     finally:
         time.sleep(Config.SLEEP_AFTER_REQ)
     return None
 
 
-
 _TAG_RE = re.compile(r"<[^>]+>")
+
 
 def strip_html(text: Optional[str]) -> str:
     if not text:
         return ""
     clean = _TAG_RE.sub("", text)
-    clean = re.sub(r"\s+", " ", clean).strip()
-    return clean
+    return re.sub(r"\s+", " ", clean).strip()
+
 
 def truncate(text: str, max_len: int = Config.SUMMARY_MAX_LEN) -> str:
     if len(text) <= max_len:
         return text
-    return text[: max_len - 1].rstrip() + "…"
+    return text[:max_len - 1].rstrip() + "…"
+
 
 def normalize_date(date_str: Optional[str]) -> str:
-    if not date_str:
-        return ""
-    return date_str.replace("-", "/")
+    return date_str.replace("-", "/") if date_str else ""
 
 
 def ensure_dir(path: str) -> None:
@@ -106,8 +102,8 @@ def read_csv(path: str) -> pd.DataFrame:
 def extract_network(item: Dict[str, Any]) -> str:
     net = item.get("network") or {}
     web = item.get("webChannel") or {}
-    name = (net.get("name") or web.get("name") or "").strip()
-    return name
+    return (net.get("name") or web.get("name") or "").strip()
+
 
 def format_genres(genres: List[str]) -> str:
     try:
