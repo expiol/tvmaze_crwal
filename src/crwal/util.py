@@ -113,15 +113,6 @@ def extract_web_channel(item: Dict[str, Any]) -> str:
 
 
 def get_earliest_air_date(sess: requests.Session, show_id: int, exclude_specials: bool = True) -> Optional[str]:
-    """
-    从episodes API获取最早的首播日期
-    Args:
-        sess: requests session
-        show_id: 节目ID
-        exclude_specials: 是否排除特别篇（season 0）
-    Returns:
-        最早的首播日期字符串，格式：YYYY-MM-DD
-    """
     url = f"{Config.BASE_URL}/shows/{show_id}/episodes"
     data = safe_get_json(sess, url)
     

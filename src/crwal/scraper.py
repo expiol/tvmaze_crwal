@@ -48,13 +48,6 @@ def fetch_shows(count: int) -> List[Dict[str, Any]]:
 
 
 def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_api: bool = True) -> pd.DataFrame:
-    """
-    转换原始数据为DataFrame
-    Args:
-        items: 从API获取的show数据列表
-        sess: requests session用于获取episodes
-        use_episodes_api: 是否使用episodes API获取真实首播日期
-    """
     rows: List[Dict[str, Any]] = []
 
     for it in tqdm(items, desc="Processing shows", ncols=90, unit="show"):
@@ -108,14 +101,6 @@ def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_
 
 
 def run(count: int, out_path: str, log_file: str = None, use_episodes_api: bool = True) -> pd.DataFrame:
-    """
-    运行数据抓取流程
-    Args:
-        count: 要抓取的节目数量
-        out_path: CSV输出路径
-        log_file: 日志文件路径
-        use_episodes_api: 是否使用episodes API获取真实首播日期（推荐：True）
-    """
     setup_logging(log_file)
     logging.info("=" * 60)
     logging.info("TVMaze Scraper Started")
