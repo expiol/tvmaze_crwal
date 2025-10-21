@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
@@ -21,73 +22,102 @@ COLUMNS = [
 ]
 
 
-def fetch_shows(count: int, fetch_newest: bool = True) -> List[Dict[str, Any]]:
-    """
-    获取节目列表
-    Args:
-        count: 要获取的节目数量
-        fetch_newest: True=获取最新节目, False=获取最早节目
-    """
+def is_valid_show(item: Dict[str, Any]) -> bool:
+    """检查节目数据是否完整（必需字段 + 评分）"""
+    # Title
+    if not item.get("name"):
+        return False
+    
+    # First air date
+    if not item.get("premiered"):
+        return False
+    
+    # Rating（作业需要分析评分，必须有）
+    rating_obj = item.get("rating") or {}
+    rating = rating_obj.get("average") if isinstance(rating_obj, dict) else None
+    if not rating:
+        return False
+    
+    # Genres (至少有一个)
+    genres = item.get("genres")
+    if not genres or (isinstance(genres, list) and len(genres) == 0):
+        return False
+    
+    # Status
+    if not item.get("status"):
+        return False
+    
+    # Network或WebChannel至少有一个
+    network = item.get("network")
+    web_channel = item.get("webChannel")
+    if not network and not web_channel:
+        return False
+    
+    return True
+
+
+def fetch_show_by_id(sess: requests.Session, show_id: int) -> Optional[Dict[str, Any]]:
+    """获取单个节目详情（用于并发）"""
+    url = f"{Config.BASE_URL}/shows/{show_id}"
+    data = safe_get_json(sess, url)
+    if data and isinstance(data, dict) and data.get("name"):
+        return data
+    return None
+
+
+def fetch_shows(count: int, fetch_newest: bool = True, filter_quality: bool = True) -> List[Dict[str, Any]]:
+    """获取节目列表，默认获取最新的、数据完整的节目"""
     sess = get_session()
     results: List[Dict[str, Any]] = []
+    skipped = 0
     
     if fetch_newest:
-        # 方法1: 先获取最近更新的节目
-        logging.info("Fetching recently updated shows...")
-        url = f"{Config.BASE_URL}/updates/shows"
-        updates = safe_get_json(sess, url)
+        print("→ Finding shows from 2020-2024 (with ratings)...")
+        logging.info("Fetching shows from recent years with ratings...")
         
-        if updates and isinstance(updates, dict):
-            # updates返回的是 {show_id: timestamp} 的字典
-            # 按时间戳排序，取最新的
-            sorted_ids = sorted(updates.items(), key=lambda x: x[1], reverse=True)
-            recent_ids = [int(show_id) for show_id, _ in sorted_ids[:count * 2]]  # 多取一些以防有无效数据
-            
-            logging.info(f"Got {len(recent_ids)} recently updated show IDs")
-            
-            # 获取这些节目的详细信息
-            with tqdm(total=min(count, len(recent_ids)), desc="Fetching show details", ncols=90, unit="show") as bar:
-                for show_id in recent_ids:
+        # 从稍微旧一点的页面开始（2020-2024），这样有评分
+        # Page 250-270大约是2020-2023年的节目
+        estimated_max_page = 260
+        page = estimated_max_page
+        
+        # 从这些页面开始抓取
+        print(f"→ Fetching from page {page} (2020-2024 shows) with {Config.MAX_WORKERS} threads...")
+        
+        with tqdm(total=count, desc="Fetching shows", ncols=100, 
+                 unit="show", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]') as bar:
+            while len(results) < count and page >= max(estimated_max_page - 3, 0):
+                url = f"{Config.BASE_URL}/shows?page={page}"
+                data = safe_get_json(sess, url)
+                
+                if not data or not isinstance(data, list):
+                    page -= 1
+                    continue
+                
+                # 反向添加（从页面的最后开始，即ID最大的）
+                for item in reversed(data):
                     if len(results) >= count:
                         break
-                    
-                    url = f"{Config.BASE_URL}/shows/{show_id}"
-                    data = safe_get_json(sess, url)
-                    
-                    if data and isinstance(data, dict) and data.get("name"):
-                        results.append(data)
-                        bar.update(1)
-        
-        # 如果还不够，从最新的页面开始补充
-        if len(results) < count:
-            logging.info(f"Fetching additional shows from recent pages (need {count - len(results)} more)...")
-            # 估算最大页码（TVMaze大约有7万+节目，每页250个）
-            estimated_max_page = 280
-            page = estimated_max_page
-            
-            with tqdm(total=count - len(results), desc="Fetching from pages", ncols=90, unit="show") as bar:
-                while len(results) < count and page >= 0:
-                    url = f"{Config.BASE_URL}/shows?page={page}"
-                    data = safe_get_json(sess, url)
-                    
-                    if not data or not isinstance(data, list):
-                        page -= 1
-                        continue
-                    
-                    # 反向添加（从页面的最后开始）
-                    for item in reversed(data):
-                        if len(results) >= count:
-                            break
-                        if isinstance(item, dict) and item.get("name"):
-                            # 检查是否已经添加过（避免重复）
-                            if not any(r.get("id") == item.get("id") for r in results):
+                    if isinstance(item, dict) and item.get("name"):
+                        # 数据质量过滤
+                        if filter_quality:
+                            if is_valid_show(item):
                                 results.append(item)
                                 bar.update(1)
-                    page -= 1
+                            else:
+                                skipped += 1
+                        else:
+                            results.append(item)
+                            bar.update(1)
+                
+                page -= 1
+        
+        if filter_quality and skipped > 0:
+            print(f"→ Skipped {skipped} shows with missing data (Total collected: {len(results)})")
     else:
-        # 原来的逻辑：从第0页开始获取最早的节目
+        print("→ Fetching from page 0 (oldest shows)...")
         page = 0
-        with tqdm(total=count, desc="Fetching shows", ncols=90, unit="show") as bar:
+        with tqdm(total=count, desc="Fetching shows", ncols=100, unit="show",
+                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]') as bar:
             while len(results) < count:
                 url = f"{Config.BASE_URL}/shows?page={page}"
                 data = safe_get_json(sess, url)
@@ -100,35 +130,66 @@ def fetch_shows(count: int, fetch_newest: bool = True) -> List[Dict[str, Any]]:
                     if len(results) >= count:
                         break
                     if isinstance(item, dict) and item.get("name"):
-                        results.append(item)
-                        bar.update(1)
+                        # 数据质量过滤
+                        if filter_quality:
+                            if is_valid_show(item):
+                                results.append(item)
+                                bar.update(1)
+                            else:
+                                skipped += 1
+                        else:
+                            results.append(item)
+                            bar.update(1)
                 page += 1
+        
+        if filter_quality and skipped > 0:
+            print(f"→ Skipped {skipped} shows with missing data (Total collected: {len(results)})")
 
     logging.info(f"Fetched {len(results)} shows ({'newest' if fetch_newest else 'oldest'} first)")
+    if filter_quality:
+        logging.info(f"Data quality filter: Skipped {skipped} shows with missing fields")
     return results[:count]
 
 
-def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_api: bool = False) -> pd.DataFrame:
-    """
-    转换原始数据为DataFrame
-    Args:
-        items: 从API获取的show数据列表
-        sess: requests session用于获取episodes
-        use_episodes_api: 是否使用episodes API获取真实首播日期（默认False）
-    """
-    rows: List[Dict[str, Any]] = []
+def fetch_episode_date_wrapper(args):
+    """包装函数用于并发"""
+    sess, show_id = args
+    return show_id, get_earliest_air_date(sess, show_id, exclude_specials=True)
 
-    for it in tqdm(items, desc="Processing shows", ncols=90, unit="show"):
+
+def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_api: bool = False) -> pd.DataFrame:
+    """转换原始数据为DataFrame"""
+    episode_dates = {}
+    
+    if use_episodes_api:
+        print(f"→ Fetching earliest air dates from episodes API with {Config.MAX_WORKERS} threads...")
+        show_ids = [it.get("id") for it in items if it.get("id")]
+        
+        with ThreadPoolExecutor(max_workers=Config.MAX_WORKERS) as executor:
+            tasks = [(sess, show_id) for show_id in show_ids]
+            
+            with tqdm(total=len(show_ids), desc="Fetching episodes", ncols=100,
+                     unit="show", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]') as bar:
+                for show_id, date in executor.map(fetch_episode_date_wrapper, tasks):
+                    if date:
+                        episode_dates[show_id] = date
+                    bar.update(1)
+    
+    # 处理数据
+    rows: List[Dict[str, Any]] = []
+    print("→ Processing show data...")
+    
+    for it in tqdm(items, desc="Processing shows", ncols=100, unit="show",
+                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}'):
         rating_obj = it.get("rating") or {}
         rating = rating_obj.get("average") if isinstance(rating_obj, dict) else None
         
         show_id = it.get("id")
         first_air_date = it.get("premiered")
         
-        if use_episodes_api and show_id:
-            earliest_date = get_earliest_air_date(sess, show_id, exclude_specials=True)
-            if earliest_date:
-                first_air_date = earliest_date
+        # 如果有从episodes API获取的日期，使用它
+        if use_episodes_api and show_id in episode_dates:
+            first_air_date = episode_dates[show_id]
         
         premiered_year = ""
         if first_air_date:
@@ -165,31 +226,20 @@ def transform(items: List[Dict[str, Any]], sess: requests.Session, use_episodes_
     return df
 
 
-def run(count: int, out_path: str, log_file: str = None, 
-        use_episodes_api: bool = False, fetch_newest: bool = True) -> pd.DataFrame:
-    """
-    运行数据抓取流程
-    Args:
-        count: 要抓取的节目数量
-        out_path: CSV输出路径
-        log_file: 日志文件路径
-        use_episodes_api: 是否使用episodes API获取真实首播日期（默认False，使用premiered字段更快）
-        fetch_newest: 是否获取最新节目（默认True，获取最近更新的节目）
-    """
+def run(count: int, out_path: str, log_file: str = None) -> pd.DataFrame:
+    """运行数据抓取流程"""
     setup_logging(log_file)
     logging.info("=" * 60)
     logging.info("TVMaze Scraper Started")
     logging.info(f"Parameters: count={count}, output={out_path}")
-    logging.info(f"  - use_episodes_api={use_episodes_api}")
-    logging.info(f"  - fetch_newest={fetch_newest}")
     
     sess = get_session()
-    items = fetch_shows(count, fetch_newest=fetch_newest)
+    items = fetch_shows(count, fetch_newest=True, filter_quality=True)
     if not items:
         logging.error("No data fetched")
         raise RuntimeError("Failed to fetch data")
     
-    df = transform(items, sess, use_episodes_api=use_episodes_api)
+    df = transform(items, sess, use_episodes_api=False)
     save_csv(df, out_path)
     
     logging.info(f"SUCCESS: Saved {len(df)} rows to {out_path}")

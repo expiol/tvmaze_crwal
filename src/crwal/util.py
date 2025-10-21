@@ -19,10 +19,11 @@ from urllib3.util.retry import Retry
 class Config:
     BASE_URL: str = "https://api.tvmaze.com"
     TIMEOUT: int = 15
-    SLEEP_AFTER_REQ: float = 0.1
+    SLEEP_AFTER_REQ: float = 0.05  # 减少到0.05秒
     MAX_RETRY: int = 3
     BACKOFF: float = 0.3
     SUMMARY_MAX_LEN: int = 280
+    MAX_WORKERS: int = 10  # 并发线程数
 
 
 def setup_logging(log_file: Optional[str] = None) -> None:
