@@ -1,14 +1,4 @@
 
----
-
-## 4) `src/crwal/util.py`
-
-```python
-# -*- coding: utf-8 -*-
-"""
-Utility helpers for TVMaze scraping & analysis (student-friendly).
-Keep it simple, readable, and robust.
-"""
 from __future__ import annotations
 
 import json
