@@ -72,20 +72,19 @@ def fetch_shows(count: int, fetch_newest: bool = True, filter_quality: bool = Tr
     skipped = 0
     
     if fetch_newest:
-        print("→ Finding shows from 2020-2024 (with ratings)...")
-        logging.info("Fetching shows from recent years with ratings...")
+        print("→ Finding shows from page 260 down to 0 (with ratings)...")
+        logging.info("Fetching shows from page 260 down to 0...")
         
-        # 从稍微旧一点的页面开始（2020-2024），这样有评分
-        # Page 250-270大约是2020-2023年的节目
-        estimated_max_page = 260
-        page = estimated_max_page
+        # 从page 260开始，一直往前翻到page 0，直到收集到200条
+        start_page = 260
+        page = start_page
         
         # 从这些页面开始抓取
-        print(f"→ Fetching from page {page} (2020-2024 shows) with {Config.MAX_WORKERS} threads...")
+        print(f"→ Fetching from page {page} down to page 0 until {count} shows...")
         
         with tqdm(total=count, desc="Fetching shows", ncols=100, 
                  unit="show", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]') as bar:
-            while len(results) < count and page >= max(estimated_max_page - 3, 0):
+            while len(results) < count and page >= 0:
                 url = f"{Config.BASE_URL}/shows?page={page}"
                 data = safe_get_json(sess, url)
                 
@@ -118,7 +117,7 @@ def fetch_shows(count: int, fetch_newest: bool = True, filter_quality: bool = Tr
         page = 0
         with tqdm(total=count, desc="Fetching shows", ncols=100, unit="show",
                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]') as bar:
-            while len(results) < count:
+            while len(results) < count and page < 50:  # 限制搜索范围
                 url = f"{Config.BASE_URL}/shows?page={page}"
                 data = safe_get_json(sess, url)
                 
