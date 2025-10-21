@@ -19,9 +19,9 @@ from urllib3.util.retry import Retry
 class Config:
     BASE_URL: str = "https://api.tvmaze.com"
     TIMEOUT: int = 15
-    SLEEP_AFTER_REQ: float = 0.6
+    SLEEP_AFTER_REQ: float = 0.1
     MAX_RETRY: int = 3
-    BACKOFF: float = 0.5
+    BACKOFF: float = 0.3
     SUMMARY_MAX_LEN: int = 280
 
 
@@ -113,20 +113,19 @@ def extract_web_channel(item: Dict[str, Any]) -> str:
 
 
 def get_earliest_air_date(sess: requests.Session, show_id: int, exclude_specials: bool = True) -> Optional[str]:
+
     url = f"{Config.BASE_URL}/shows/{show_id}/episodes"
     data = safe_get_json(sess, url)
     
     if not data or not isinstance(data, list):
         return None
     
-    # 可选：排除特别篇 (season == 0 或 None)
     if exclude_specials:
         regular_episodes = [ep for ep in data if isinstance(ep.get("season"), int) and ep.get("season") > 0]
         episodes = regular_episodes if regular_episodes else data
     else:
         episodes = data
     
-    # 找出最早的airdate
     dates = [ep.get("airdate") for ep in episodes if ep.get("airdate")]
     return min(dates) if dates else None
 
