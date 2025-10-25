@@ -1,6 +1,6 @@
-# TVMaze Web Scraping & Analysis
+# TVMaze 爬虫与数据分析
 
-从 TVMaze API 抓取 ≥200 条影视节目数据并生成可视化分析图表。
+从 TVMaze 网站抓取电视节目数据并进行可视化分析。
 
 ## 快速开始
 
@@ -14,10 +14,10 @@ pip install -r requirements.txt
 python start.py
 ```
 
-一键完成：
-- 抓取 200 条数据 → `data/YangHong2255396.csv`
-- 生成 7 幅图表 → `data/figures/`
-- 记录运行日志 → `logs/scrape.log`
+程序会自动：
+- 抓取数据并保存到 `data/日期/YangHong2255396.csv`
+- 生成图表到 `data/日期/figures/`
+- 记录日志到 `logs/scrape.log`
 
 ## 项目结构
 
@@ -55,51 +55,34 @@ tvmaze_crwal-main/
 | **Runtime** | 单集时长（分钟）（新增） | 47 |
 | **Premiered Year** | 首播年份（新增） | "2008" |
 
-### 可视化图表（7 幅）
+### 生成的图表
 
-1. `top_20_rated.png` - Top 20 评分最高节目
+1. `top_20_rated.png` - 评分最高的20个节目
 2. `rating_hist.png` - 评分分布直方图
 3. `status_mean_rating.png` - 不同状态的平均评分
-4. `genre_mean_top10.png` - Top 10 类型平均评分
-5. `year_counts.png` - 节目首播年度趋势
-6. `network_top15.png` - Top 15 电视网络
-7. `genre_boxplot_top6.png` - Top 6 类型评分分布
+4. `genre_mean_top10.png` - 各类型平均评分
+5. `year_counts.png` - 节目首播年份趋势
+6. `network_top15.png` - 主要电视网络
+7. `genre_boxplot_top6.png` - 类型评分分布箱线图
+8. `platform_mean_rating.png` - 流媒体与传统电视对比
 
-## 功能特性
+## 功能特点
 
-- ✅ **获取最新节目** - 使用 `/updates/shows` API 获取最近更新的节目
-- ✅ 灵活配置 - 可选择获取最新/最旧节目
-- ✅ 智能重试与速率限制
-- ✅ 数据验证与清洗
-- ✅ 实时进度显示
-- ✅ 详细日志记录
-- ✅ 专业可视化图表
-- ✅ 中文字体自动适配
+- 多线程并发抓取，提高效率
+- 自动处理网络错误和重试
+- 数据完整性验证
+- 生成多种统计图表
 
-## 自定义配置
+## 配置说明
 
-编辑 `start.py` 修改参数：
+在 `start.py` 中可以修改：
+- `START_PAGE` / `END_PAGE`: 抓取的页面范围
+- `max_workers`: 并发线程数
 
-```python
-COUNT = 200                                          # 抓取数量
-OUT_PATH = os.path.join("data", "YangHong2255396.csv")  # 输出路径
-LOG_PATH = os.path.join("logs", "scrape.log")       # 日志路径
-FIG_DIR = os.path.join("data", "figures")           # 图表目录
-
-# 重要配置
-USE_EPISODES_API = False  # 是否调用episodes API（True=慢，False=快）
-FETCH_NEWEST = True       # 是否获取最新节目（True=最新，False=最旧）
-```
-
-修改 `src/crwal/util.py` 中的 `Config` 类调整 API 参数：
-
-```python
-@dataclass(frozen=True)
-class Config:
-    SLEEP_AFTER_REQ: float = 0.1    # 请求间隔（秒）
-    MAX_RETRY: int = 3              # 最大重试次数
-    TIMEOUT: int = 15               # 请求超时（秒）
-```
+在 `src/crwal/util.py` 中可以调整：
+- `MIN_INTERVAL`: 请求间隔时间
+- `TIMEOUT`: 请求超时时间
+- `MAX_RETRY`: 重试次数
 
 ## 技术栈
 
@@ -109,17 +92,17 @@ class Config:
 - **tqdm** - 进度显示
 - **numpy** - 数值计算
 
-## 作业要求对照
+## 作业要求
 
-| 要求 | 实现 |
-|------|------|
-| 抓取 ≥200 条数据 | ✅ 200条 |
-| 包含 8 个必需列 | ✅ 完整（额外增加4列） |
-| 生成 ≥5 幅图表 | ✅ 7幅 |
-| 代码规范 | ✅ 类型提示 + 模块化结构 |
-| 错误处理 | ✅ 重试机制 + 异常处理 |
+| 要求 | 完成情况 |
+|------|---------|
+| 抓取 ≥200 条数据 | ✅ 默认10页约200条 |
+| 包含 8 个必需字段 | ✅ Title, First air date, End date, Rating, Genres, Status, Network, Summary |
+| 生成 ≥5 幅图表 | ✅ 共8幅图表 |
+| 代码规范 | ✅ 模块化设计，有注释 |
+| 错误处理 | ✅ 包含重试和异常处理 |
 
 ---
 
-**作者**: yang hong (2255396)  
-**日期**: 2025-10-21
+**学号**: 2255396  
+**姓名**: Yang Hong

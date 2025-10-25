@@ -15,7 +15,6 @@ from bs4 import BeautifulSoup, Tag
 from tqdm import tqdm
 
 from .util import (
-    Config,
     get_session,
     strip_html,
     truncate,
@@ -33,7 +32,7 @@ from .util import (
 BASE = "https://www.tvmaze.com"
 LISTING_TEMPLATE = "https://www.tvmaze.com/shows?page={page}"
 
-# 输出 CSV 列（题目要求）
+# 输出 CSV 列（符合项目要求的8个必需字段）
 COLUMNS = [
     "Title",
     "First air date",
@@ -45,12 +44,13 @@ COLUMNS = [
     "Summary",
 ]
 
+# 页面范围配置
 DEFAULT_START_PAGE = 1
-DEFAULT_END_PAGE = 3344
+DEFAULT_END_PAGE = 3344  # TVMaze 总页数（截至2025年）
 
-# 请求节流与重试
-SLEEP_RANGE = (0.2, 0.8)
-MAX_RETRIES = 2
+# 请求节流与重试配置（已在util.py中统一管理）
+SLEEP_RANGE = (0.2, 0.8)  # 已弃用，使用Config.MIN_INTERVAL
+MAX_RETRIES = 2  # 已弃用，使用Config.MAX_RETRY
 
 
 # -------------------------
@@ -138,46 +138,31 @@ def _select_one_with_classes(parent: Tag, classes: List[str]) -> Optional[Tag]:
 # -------------------------
 
 def parse_listing_page(html: str) -> List[str]:
-    """
-    列表页 -> 详情页 URL 列表
-    依据你给的片段，每张卡片结构为：
-      <div class="card primary grid-x">
-        ...
-        <div class="content ...">
-          <span class="title"><h2><a href="/shows/{id}/{slug}">...</a></h2></span>
-    """
+    """解析列表页，提取节目详情页URL"""
     soup = _soup(html)
     urls: List[str] = []
 
     # 主要选择器：卡片标题里的详情链接
     for a in soup.select('div.card.primary.grid-x .content .title h2 a[href^="/shows/"]'):
         href = a.get("href") or ""
-        # 仅保留 /shows/{id}/{slug}
+        # 仅保留 /shows/{id}/{slug} 格式的链接
         if re.fullmatch(r"/shows/\d+/.+", href):
             urls.append(_join_url(href))
 
-    # 备用：海报图上的链接（若上面没抓全）
+    # 备用选择器：海报图上的链接（若主选择器未找到）
     if not urls:
         for a in soup.select('div.card.primary.grid-x figure.image a[href^="/shows/"]'):
             href = a.get("href") or ""
             if re.fullmatch(r"/shows/\d+/.+", href):
                 urls.append(_join_url(href))
 
-    # 去重保持顺序
+    # 去重并保持顺序
     urls = list(dict.fromkeys(urls))
     return urls
 
 
 def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
-    """
-    解析详情页（Main）：
-      - Title: <h1 class="show-for-medium">...</h1>
-      - Rating: #general-info-panel [itemprop="aggregateRating"] [itemprop="ratingValue"]
-      - Genres: #general-info-panel 内 "Genres:" 所在 div 下 span.divider > span*
-      - Status: #general-info-panel 内 "Status:" 所在 div
-      - Network: #general-info-panel 内 a[href^="/networks/"] 的文本（例如 ABC）
-      - Summary: #general-information article p 第一段
-    """
+    """解析详情页，提取节目信息"""
     soup = _soup(html)
 
     # 标题
@@ -240,16 +225,12 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
             if items:
                 genres = format_genres(items)
 
-    # Summary（主内容区介绍段落）
     summary = None
     summary_p = soup.select_one("#general-information article p")
     if summary_p:
-        # 去 HTML 标签，同时清掉可能前置的 <b>Title</b> 前缀
         summary_html = str(summary_p)
         txt = strip_html(summary_html)
         if txt:
-            # 例如 "<b>High Potential</b> follows ..." 会残留 "High Potential follows ..."
-            # 不强制删除标题，直接使用 strip_html 结果；如需严格去掉标题，可用正则：
             if title:
                 txt = re.sub(rf"^\s*{re.escape(title)}\s*", "", txt).strip()
             summary = txt
@@ -356,13 +337,14 @@ def _gather_all_show_urls(
     end_page: int,
     max_workers: Optional[int] = None,
 ) -> List[str]:
-    """
-    并行抓取所有列表页，汇总 show 详情页 URL。
-    """
+    """并行抓取列表页，收集所有节目URL"""
     session = get_session()
     pages = list(range(start_page, end_page + 1))
     all_urls: List[str] = []
+    failed_pages: List[int] = []
 
+    logging.info(f"Starting to gather show URLs from {len(pages)} listing pages...")
+    
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(fetch_listing_urls, session, p): p for p in pages}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Listing pages"):
@@ -372,22 +354,38 @@ def _gather_all_show_urls(
                 all_urls.extend(urls)
             except Exception as e:
                 logging.warning(f"[Listing] page={p} failed: {e}")
+                failed_pages.append(p)
 
     # 去重并保持顺序
     all_urls = list(dict.fromkeys(all_urls))
-    logging.info(f"Collected {len(all_urls)} show URLs from pages {start_page}..{end_page}")
+    
+    # 汇总统计
+    success_rate = ((len(pages) - len(failed_pages)) / len(pages) * 100) if pages else 0
+    logging.info(
+        f"Collected {len(all_urls)} unique show URLs from pages {start_page}..{end_page} "
+        f"(success rate: {success_rate:.1f}%, failed pages: {len(failed_pages)})"
+    )
+    
+    if failed_pages and len(failed_pages) <= 10:
+        logging.info(f"Failed pages: {failed_pages}")
+    
     return all_urls
 
 
 def _process_single_show(session: requests.Session, show_url: str) -> Optional[ShowRecord]:
-    """
-    单个 Show 的完整处理：详情页 + 剧集页 => ShowRecord
-    """
+    """处理单个节目，返回ShowRecord"""
     try:
+        # 抓取详情页
         detail = fetch_show_detail(session, show_url)
+        if not detail:
+            logging.debug(f"[Show] No detail data for {show_url}")
+            return None
+        
+        # 抓取剧集页
         episodes_url = _episodes_url_from_show_url(show_url)
         first_date, end_date = fetch_episodes_dates(session, episodes_url)
 
+        # 组装记录
         rec = ShowRecord(
             title=detail.get("Title"),
             first_air_date=first_date,
@@ -399,8 +397,11 @@ def _process_single_show(session: requests.Session, show_url: str) -> Optional[S
             summary=detail.get("Summary"),
         )
         return rec
+    except KeyboardInterrupt:
+        # 允许用户中断
+        raise
     except Exception as e:
-        logging.warning(f"[Show] {show_url} failed: {e}")
+        logging.warning(f"[Show] Failed to process {show_url}: {type(e).__name__}: {e}")
         return None
 
 

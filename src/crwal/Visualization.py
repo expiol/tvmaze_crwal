@@ -12,38 +12,51 @@ import matplotlib.pyplot as plt
 from .util import read_csv, ensure_dir, setup_logging
 
 
-# ========= Nature（NPG）有色配色 =========
-# 参考常见的 Nature Publishing Group（NPG）调色板（广泛用于学术可视化）
+# Nature Publishing Group (NPG) color palette
 NPG_CYCLE = [
-    "#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F",
-    "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"
+    "#E64B35",
+    "#4DBBD5",
+    "#00A087",
+    "#3C5488",
+    "#F39B7F",
+    "#8491B4",
+    "#91D1C2",
+    "#DC0000",
+    "#7E6148",
+    "#B09C85",
 ]
-# 语义色（按需挑选）
+
+# Semantic color definitions
 NPG = {
-    "primary":  "#3C5488",  # 深蓝
-    "secondary":"#E64B35",  # 红
-    "success":  "#00A087",  # 绿
-    "warning":  "#F39B7F",  # 橙
-    "info":     "#4DBBD5",  # 青
-    "purple":   "#8491B4",
-    "teal":     "#91D1C2",
-    "scarlet":  "#DC0000",
-    "brown":    "#7E6148",
-    "beige":    "#B09C85",
+    "primary":   "#3C5488",
+    "secondary": "#E64B35",
+    "success":   "#00A087",
+    "warning":   "#F39B7F",
+    "info":      "#4DBBD5",
+    "purple":    "#8491B4",
+    "teal":      "#91D1C2",
+    "scarlet":   "#DC0000",
+    "brown":     "#7E6148",
+    "beige":     "#B09C85",
+    "dark_gray": "#2C2C2C",
+    "light_gray":"#E5E5E5",
 }
 
 
-# ========= 期刊风格 Matplotlib（不依赖 seaborn） =========
+# Configure matplotlib style
 def configure_matplotlib() -> None:
-    """
-    期刊风格（Nature 配色）：
-    - 统一字体/线宽/刻度风格
-    - 使用 NPG_CYCLE 作为默认颜色循环
-    - 300dpi 导出，便于报告直接使用
-    """
+    """Configure matplotlib with Nature journal style"""
     try:
-        # 中文字体回退
-        fonts = ['SimHei', 'Heiti TC', 'WenQuanYi Micro Hei', 'STHeiti', 'Arial Unicode MS', 'Arial', 'DejaVu Sans']
+        fonts = [
+            'Arial',
+            'Helvetica',
+            'DejaVu Sans',
+            'SimHei',
+            'Heiti TC',
+            'WenQuanYi Micro Hei',
+            'STHeiti',
+            'Arial Unicode MS',
+        ]
         for font in fonts:
             try:
                 plt.rcParams['font.sans-serif'] = [font] + plt.rcParams.get('font.sans-serif', [])
@@ -51,79 +64,89 @@ def configure_matplotlib() -> None:
             except Exception:
                 continue
         plt.rcParams['axes.unicode_minus'] = False
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"Font configuration warning: {e}")
 
     plt.rcParams.update({
-        # 图形与导出
         'figure.dpi': 120,
         'savefig.dpi': 300,
         'figure.facecolor': 'white',
         'savefig.facecolor': 'white',
         'savefig.bbox': 'tight',
-        'savefig.pad_inches': 0.08,
-
-        # 字体与字号
+        'savefig.pad_inches': 0.1,
+        'savefig.format': 'png',
         'font.family': 'sans-serif',
-        'font.size': 10,
-        'axes.labelsize': 10,
-        'axes.titlesize': 11,
+        'font.size': 11,
+        'axes.labelsize': 12,
+        'axes.titlesize': 13,
         'axes.titleweight': 'bold',
-
-        # 坐标轴与网格
+        'axes.labelweight': 'normal',
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'legend.fontsize': 10,
         'axes.facecolor': 'white',
-        'axes.edgecolor': '#222222',
-        'axes.linewidth': 1.0,
+        'axes.edgecolor': NPG['dark_gray'],
+        'axes.linewidth': 1.2,
         'axes.grid': False,
         'axes.axisbelow': True,
         'axes.spines.top': False,
         'axes.spines.right': False,
-
-        # 刻度
+        'axes.spines.left': True,
+        'axes.spines.bottom': True,
         'xtick.direction': 'out',
         'ytick.direction': 'out',
-        'xtick.major.size': 4,
-        'ytick.major.size': 4,
-        'xtick.minor.size': 2,
-        'ytick.minor.size': 2,
-
-        # 线条与误差线
-        'lines.linewidth': 1.7,
-        'lines.markersize': 5.5,
-
-        # 图例
+        'xtick.major.size': 5,
+        'ytick.major.size': 5,
+        'xtick.minor.size': 3,
+        'ytick.minor.size': 3,
+        'xtick.major.width': 1.0,
+        'ytick.major.width': 1.0,
+        'xtick.color': NPG['dark_gray'],
+        'ytick.color': NPG['dark_gray'],
+        'lines.linewidth': 2.0,
+        'lines.markersize': 6,
+        'lines.markeredgewidth': 0.8,
         'legend.frameon': False,
-
-        # 矢量友好
+        'legend.loc': 'best',
+        'legend.fancybox': False,
+        'grid.color': NPG['light_gray'],
+        'grid.linestyle': '--',
+        'grid.linewidth': 0.5,
+        'grid.alpha': 0.7,
         'pdf.fonttype': 42,
         'ps.fonttype': 42,
+        'svg.fonttype': 'none',
     })
 
-    # 设置默认颜色循环为 NPG 调色板
     plt.rcParams['axes.prop_cycle'] = plt.cycler(color=NPG_CYCLE)
 
 
 def _set_axes(ax: plt.Axes, xlabel: str = None, ylabel: str = None, title: str = None) -> None:
+    """Set axes style"""
     ax.minorticks_on()
-    ax.tick_params(axis='both', which='both', direction='out', length=4, width=1, pad=2)
+    ax.tick_params(axis='both', which='major', direction='out', length=5, width=1.0, pad=4, labelsize=10, colors=NPG['dark_gray'])
+    ax.tick_params(axis='both', which='minor', direction='out', length=3, width=0.8, colors=NPG['dark_gray'])
+    
     for spine in ['left', 'bottom']:
-        ax.spines[spine].set_linewidth(1)
-        ax.spines[spine].set_color('#222222')
+        ax.spines[spine].set_linewidth(1.2)
+        ax.spines[spine].set_color(NPG['dark_gray'])
     for spine in ['right', 'top']:
         ax.spines[spine].set_visible(False)
+    
     if xlabel:
-        ax.set_xlabel(xlabel)
+        ax.set_xlabel(xlabel, fontsize=12, fontweight='normal', color=NPG['dark_gray'])
     if ylabel:
-        ax.set_ylabel(ylabel)
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='normal', color=NPG['dark_gray'])
     if title:
-        ax.set_title(title, pad=10)
+        ax.set_title(title, pad=12, fontsize=13, fontweight='bold', color=NPG['dark_gray'])
 
 
 def _footnote(ax: plt.Axes, text: str) -> None:
-    ax.figure.text(0.01, 0.01, text, ha='left', va='bottom', fontsize=8, color="#6e6e6e")
+    """Add footnote to chart"""
+    ax.figure.text(0.01, 0.01, text, ha='left', va='bottom', fontsize=8, color='#666666', style='italic', alpha=0.8)
 
 
-# ========= 数据处理 =========
+# Data processing functions
 def parse_genres_cell(cell: str) -> List[str]:
     if not isinstance(cell, str) or not cell:
         return []
@@ -164,7 +187,7 @@ def explode_genres(df: pd.DataFrame) -> pd.DataFrame:
     return df_exploded.dropna(subset=["Genre"])
 
 
-# ========= 统计工具 =========
+# Statistical tools
 def _auto_bins(vals: np.ndarray, max_bins: int = 50) -> int:
     if len(vals) < 2:
         return 5
@@ -214,7 +237,7 @@ def _permutation_test_diff_means(x: np.ndarray, y: np.ndarray, n_perm: int = 100
     return (count + 1) / (n_perm + 1)  # add-one smoothing
 
 
-# ========= 平台识别（Streaming vs TV） =========
+# Platform identification (Streaming vs TV)
 STREAMING_KEYWORDS = [
     "Netflix", "Amazon", "Prime", "Hulu", "Disney", "Apple TV", "AppleTV", "Apple+",
     "HBO Max", "Max", "Paramount", "Paramount+", "Peacock", "Discovery", "Discovery+",
@@ -233,62 +256,85 @@ def _platform_from_network(network: str) -> str:
     return "TV"
 
 
-# ========= 可视化图表（Nature配色） =========
+# Visualization charts with Nature color scheme
 def fig_top_rated(df: pd.DataFrame, k: int, save_path: str) -> None:
-    """Top K 评分最高（横向条形图，NPG色循环）"""
+    """Generate horizontal bar chart of top K rated shows"""
     if "Rating" not in df.columns or "Title" not in df.columns:
+        logging.warning("Missing required columns for top_rated chart")
         return
+    
     data = df.dropna(subset=["Rating"]).sort_values("Rating", ascending=False).head(k)
     if data.empty:
+        logging.warning("No data available for top_rated chart")
         return
 
-    fig, ax = plt.subplots(figsize=(10.5, max(5.5, int(k * 0.42))))
+    fig, ax = plt.subplots(figsize=(11, max(6, int(k * 0.45))))
     titles = data["Title"].astype(str).values[::-1]
     ratings = data["Rating"].astype(float).values[::-1]
     y = np.arange(len(titles))
 
     colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(titles))]
-    ax.barh(y, ratings, color=colors[::-1], edgecolor="#222", linewidth=0.8, height=0.8)
-    ax.set_yticks(y, labels=[f"{i+1}. {t}" for i, t in enumerate(titles)])
+    bars = ax.barh(y, ratings, color=colors[::-1], edgecolor=NPG['dark_gray'], 
+                   linewidth=1.0, height=0.75, alpha=0.85)
+    
+    ax.set_yticks(y, labels=[f"{i+1}. {t}" for i, t in enumerate(titles)], fontsize=10)
     ax.set_xlim(0, 10.5)
 
     for i, r in enumerate(ratings):
-        ax.text(min(r + 0.12, 10.35), i, f"{r:.1f}", va='center', ha='left', fontsize=9, color="#111")
+        ax.text(min(r + 0.15, 10.3), i, f"{r:.1f}", 
+                va='center', ha='left', fontsize=9, 
+                color=NPG['dark_gray'], fontweight='bold')
 
-    _set_axes(ax, xlabel="Rating", title=f"Top {k} Highest Rated TV Shows")
-    _footnote(ax, f"仅包含有评分的条目；首页截断样本可能抬高热门在榜比例。n={len(data)}")
+    _set_axes(ax, xlabel="Rating (0-10)", title=f"Top {k} Highest Rated TV Shows")
+    _footnote(ax, f"Sample size: n={len(data)}")
     fig.tight_layout()
-    fig.savefig(save_path)
+    fig.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
+    logging.info(f"Saved: {save_path}")
 
 
 def fig_rating_hist(df: pd.DataFrame, bins: Optional[int], save_path: str) -> None:
-    """评分分布直方图（NPG主色 + 均值/中位数）"""
+    """Generate rating distribution histogram with mean and median lines"""
     if "Rating" not in df.columns:
+        logging.warning("Missing Rating column for histogram")
         return
+    
     vals = df["Rating"].dropna().values
     if len(vals) == 0:
+        logging.warning("No rating data available for histogram")
         return
 
     bins_used = bins if isinstance(bins, int) and bins > 0 else _auto_bins(vals)
-    fig, ax = plt.subplots(figsize=(9.5, 6.0))
+    fig, ax = plt.subplots(figsize=(10, 6.5))
 
-    ax.hist(vals, bins=bins_used, color=NPG["teal"], edgecolor="#222", linewidth=0.8)
+    n, bins_edges, patches = ax.hist(
+        vals, bins=bins_used, 
+        color=NPG["info"], 
+        edgecolor=NPG['dark_gray'], 
+        linewidth=0.9,
+        alpha=0.75
+    )
+    
     mean_val, median_val, std_val = vals.mean(), np.median(vals), vals.std()
 
-    ax.axvline(mean_val, color=NPG["primary"], linestyle='--', linewidth=1.8, label=f"Mean {mean_val:.2f}")
-    ax.axvline(median_val, color=NPG["secondary"], linestyle='-.', linewidth=1.6, label=f"Median {median_val:.2f}")
-    ax.legend(loc='upper left', fontsize=9)
+    ax.axvline(mean_val, color=NPG["primary"], linestyle='--', 
+               linewidth=2.2, label=f"Mean: {mean_val:.2f}", alpha=0.9)
+    ax.axvline(median_val, color=NPG["secondary"], linestyle='-.', 
+               linewidth=2.0, label=f"Median: {median_val:.2f}", alpha=0.9)
+    
+    ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
 
-    _set_axes(ax, xlabel="Rating", ylabel="Count", title="Distribution of Ratings")
-    _footnote(ax, f"n={len(vals)}；μ={mean_val:.2f}；σ={std_val:.2f}")
+    _set_axes(ax, xlabel="Rating (0-10)", ylabel="Frequency", 
+              title="Distribution of TV Show Ratings")
+    _footnote(ax, f"n={len(vals)}, mean={mean_val:.2f}, std={std_val:.2f}")
     fig.tight_layout()
-    fig.savefig(save_path)
+    fig.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
+    logging.info(f"Saved: {save_path}")
 
 
 def fig_status_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 3) -> None:
-    """播出状态 vs 平均评分（NPG色 + 95%CI + 样本量）"""
+    """Status vs average rating with 95% CI"""
     if "Status" not in df.columns or "Rating" not in df.columns:
         return
     g = df.groupby("Status", dropna=False)["Rating"]
@@ -321,14 +367,13 @@ def fig_status_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 
     for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
         ax.text(i, m + 0.15, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
 
-    # Running vs Ended 置换检验（若同时存在）
     run_vals = df[df["Status"].fillna("").str.contains("Running", case=False, na=False)]["Rating"].dropna().values
     end_vals = df[df["Status"].fillna("").str.contains("Ended", case=False, na=False)]["Rating"].dropna().values
     if len(run_vals) > 0 and len(end_vals) > 0:
         p = _permutation_test_diff_means(run_vals, end_vals)
-        _footnote(ax, f"仅显示样本量≥{min_group_n}的状态；Permutation p (Running vs Ended) = {p:.4f}")
+        _footnote(ax, f"Groups with n>={min_group_n}. Permutation test p-value (Running vs Ended) = {p:.4f}")
     else:
-        _footnote(ax, f"仅显示样本量≥{min_group_n}的状态。")
+        _footnote(ax, f"Groups with n>={min_group_n}")
 
     fig.tight_layout()
     fig.savefig(save_path)
@@ -336,7 +381,7 @@ def fig_status_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 
 
 
 def fig_genre_mean_rating(df: pd.DataFrame, topn: int, save_path: str, min_count: int = 5) -> None:
-    """类型平均评分（Top-N + 95%CI，NPG色；过滤稀疏类型）"""
+    """Genre average rating (Top-N with 95% CI)"""
     if "Genres" not in df.columns or "Rating" not in df.columns:
         return
     dfg = explode_genres(df)
@@ -372,14 +417,14 @@ def fig_genre_mean_rating(df: pd.DataFrame, topn: int, save_path: str, min_count
     for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
         ax.text(i, m + 0.12, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
 
-    _footnote(ax, "误差线为95%自助法置信区间；设最小样本门槛以抑制“冷门类型=高分”的错觉。")
+    _footnote(ax, f"Error bars: 95% bootstrap CI. Min sample size: {min_count}")
     fig.tight_layout()
     fig.savefig(save_path)
     plt.close(fig)
 
 
 def fig_year_counts(df: pd.DataFrame, save_path: str) -> None:
-    """首播年度趋势（NPG主色线+填充）"""
+    """Premiere year trend"""
     if "First air date" not in df.columns:
         return
     dfy = add_year_columns(df)
@@ -412,14 +457,14 @@ def fig_year_counts(df: pd.DataFrame, save_path: str) -> None:
                 fontsize=9, color="#111")
 
     _set_axes(ax, xlabel="Premiere Year", ylabel="Number of Shows", title="TV Show Premiere Trend Over Time")
-    _footnote(ax, "仅根据可用首播年份统计；首页截断样本可能放大近年节目密度。")
+    _footnote(ax, f"Based on available premiere dates. n={len(agg)} years")
     fig.tight_layout()
     fig.savefig(save_path)
     plt.close(fig)
 
 
 def fig_network_topn(df: pd.DataFrame, topn: int, save_path: str) -> None:
-    """网络频道节目数量（Top-N；NPG色循环 + 数值标签）"""
+    """Network show count (Top-N)"""
     if "Network" not in df.columns:
         return
     cnt = df["Network"].fillna("").replace("", "Unknown").value_counts().head(topn)
@@ -437,14 +482,14 @@ def fig_network_topn(df: pd.DataFrame, topn: int, save_path: str) -> None:
         ax.text(i, v + max(cnt.values) * 0.01, f"{int(v)}", ha='center', va='bottom', fontsize=9, color="#111")
 
     _set_axes(ax, ylabel="Number of Shows", title=f"Top {topn} Networks/Channels by Show Count")
-    _footnote(ax, f"仅显示Top-{topn}；合计（Top-{topn}）={int(cnt.sum())}。")
+    _footnote(ax, f"Top {topn} networks. Total: {int(cnt.sum())} shows")
     fig.tight_layout()
     fig.savefig(save_path)
     plt.close(fig)
 
 
 def fig_genre_boxplot(df: pd.DataFrame, topk_genres: int, save_path: str) -> None:
-    """类型评分分布箱线图（Top-k 类型；NPG色）"""
+    """Genre rating distribution boxplot (Top-k genres)"""
     if "Genres" not in df.columns or "Rating" not in df.columns:
         return
     dfg = explode_genres(df)
@@ -460,7 +505,6 @@ def fig_genre_boxplot(df: pd.DataFrame, topk_genres: int, save_path: str) -> Non
     labels, series = zip(*valid)
     fig, ax = plt.subplots(figsize=(11.8, 7.2))
 
-    # 每个箱体给一个NPG颜色
     colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(labels))]
     bp = ax.boxplot(series, labels=labels, patch_artist=True, showmeans=True,
                     boxprops=dict(facecolor='white', edgecolor="#222", linewidth=1.2),
@@ -470,23 +514,22 @@ def fig_genre_boxplot(df: pd.DataFrame, topk_genres: int, save_path: str) -> Non
                     whiskerprops=dict(linewidth=1.2, color="#222"),
                     capprops=dict(linewidth=1.2, color="#222"),
                     flierprops=dict(marker='o', markerfacecolor=NPG["teal"], markeredgecolor='none', markersize=4, alpha=0.6))
-    # 给箱体上色边框（顶部边框）
     for patch, c in zip(bp['boxes'], colors):
         try:
-            patch.set_facecolor(c + "20")  # 轻微透明（若环境不支持HEX+alpha则fallback）
+            patch.set_facecolor(c + "20")
         except Exception:
             patch.set_facecolor(c)
             patch.set_alpha(0.25)
 
     _set_axes(ax, ylabel="Rating", title=f"Rating Distribution by Genre (Top {topk_genres} by count)")
-    _footnote(ax, "箱体=IQR，线=中位数，菱形=均值；仅显示出现次数最多的Top-k类型。")
+    _footnote(ax, f"Box=IQR, line=median, diamond=mean. Top {topk_genres} genres by frequency")
     fig.tight_layout()
     fig.savefig(save_path)
     plt.close(fig)
 
 
 def fig_platform_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 5) -> None:
-    """平台差异（Streaming vs TV）：NPG色 + 95%CI + 置换检验p值"""
+    """Platform comparison (Streaming vs TV) with 95% CI"""
     if "Network" not in df.columns or "Rating" not in df.columns:
         return
     d = df.copy()
@@ -521,28 +564,24 @@ def fig_platform_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int 
     for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
         ax.text(i, m + 0.12, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
 
-    # 置换检验（Streaming vs TV）
     s_vals = d[d["Platform"] == "Streaming"]["Rating"].dropna().values
     t_vals = d[d["Platform"] == "TV"]["Rating"].dropna().values
     if len(s_vals) >= min_group_n and len(t_vals) >= min_group_n:
         p = _permutation_test_diff_means(s_vals, t_vals)
-        _footnote(ax, f"Permutation p (Streaming vs TV) = {p:.4f}；仅显示样本量≥{min_group_n}的组。")
+        _footnote(ax, f"Permutation test p-value (Streaming vs TV) = {p:.4f}. Groups with n>={min_group_n}")
     else:
-        _footnote(ax, f"仅显示样本量≥{min_group_n}的组。")
+        _footnote(ax, f"Groups with n>={min_group_n}")
 
     fig.tight_layout()
     fig.savefig(save_path)
     plt.close(fig)
 
 
-# ========= 数据清洗（关键：排除占位结束日） =========
+# Data sanitization
 _PLACEHOLDER_END_DATES = {"9999-12-31", "9999/12/31"}
 
 def sanitize_dates(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    - 将 End date 为占位值（9999-12-31 或 9999/12/31）置为 NaN，避免被下游分析/图表误用
-    - 不改动 First air date（首播年用于 fig_year_counts）
-    """
+    """Remove placeholder end dates"""
     df = df.copy()
     if "End date" in df.columns:
         mask_placeholder = df["End date"].astype(str).isin(_PLACEHOLDER_END_DATES)
@@ -552,7 +591,7 @@ def sanitize_dates(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ========= 主流程 =========
+# Main visualization function
 def run(csv_path: str, save_dir: str, topk: int = 20) -> None:
     setup_logging()
     logging.info("=" * 60)
@@ -564,23 +603,18 @@ def run(csv_path: str, save_dir: str, topk: int = 20) -> None:
 
     df = read_csv(csv_path)
 
-    # ---- 字段健壮性检查与补齐 ----
     expected_cols = ["Rating", "Title", "Genres", "Status", "First air date", "Network", "End date"]
     for c in expected_cols:
         if c not in df.columns:
             logging.warning(f"Column '{c}' not found in dataset; filling with default.")
             df[c] = np.nan
 
-    # 评分统一为数值
     df["Rating"] = pd.to_numeric(df.get("Rating"), errors="coerce")
-
-    # 关键：排除“连载中占位结束日”
     df = sanitize_dates(df)
 
     logging.info(f"Dataset: {len(df)} rows; rows with rating: {df['Rating'].notna().sum()}, "
                  f"Avg rating: {df['Rating'].mean():.2f}")
 
-    # 图文对比的核心可视化（全部采用 NPG 色）：
     fig_top_rated(df, k=topk, save_path=os.path.join(save_dir, f"top_{topk}_rated.png"))
     fig_rating_hist(df, bins=20, save_path=os.path.join(save_dir, "rating_hist.png"))
     fig_status_mean_rating(df, save_path=os.path.join(save_dir, "status_mean_rating.png"))
@@ -588,7 +622,6 @@ def run(csv_path: str, save_dir: str, topk: int = 20) -> None:
     fig_year_counts(df, save_path=os.path.join(save_dir, "year_counts.png"))
     fig_network_topn(df, topn=15, save_path=os.path.join(save_dir, "network_top15.png"))
     fig_genre_boxplot(df, topk_genres=6, save_path=os.path.join(save_dir, "genre_boxplot_top6.png"))
-
     fig_platform_mean_rating(df, save_path=os.path.join(save_dir, "platform_mean_rating.png"))
 
     logging.info(f"SUCCESS: All visualizations saved to {save_dir}")

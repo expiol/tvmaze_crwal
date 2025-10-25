@@ -28,9 +28,11 @@ class Config:
     BACKOFF: float = 0.3            # urllib3 指数退避因子
     SUMMARY_MAX_LEN: int = 280
     MAX_WORKERS: int = 4            # 线程池并发（建议 3~4）
-    MIN_INTERVAL: float = 0.7       # 全局最小请求间隔（秒）
-    JITTER_MAX: float = 0.35        # 抖动上限（秒）
-    PER_HOST_CONCURRENCY: int = 3   # 同一域名并发上限（信号量）
+    MIN_INTERVAL: float = 0.8       # 全局最小请求间隔（秒）- 提高到0.8秒更安全
+    JITTER_MAX: float = 0.4         # 抖动上限（秒）- 增加随机性
+    PER_HOST_CONCURRENCY: int = 2   # 同一域名并发上限（信号量）- 降低到2更保守
+    RATE_LIMIT_BACKOFF: float = 2.0 # 429错误基础退避时间（秒）
+    MAX_RATE_LIMIT_SLEEP: float = 60.0  # 429错误最大等待时间（秒）
 
 
 # 常见桌面浏览器 UA（Chrome/Firefox/Edge/Safari，Windows/macOS）
@@ -116,62 +118,92 @@ def get_html(
     referer: Optional[str] = None,
     *,
     max_attempts: int = 6,
-    base_sleep: float = 0.9,
+    base_sleep: float = 1.0,
 ) -> Optional[str]:
-    """
-    仅用于 HTML 页面抓取；指数退避；尊重 Retry-After；带 Referer。
-    返回 text 或 None。
-    """
+    """获取HTML页面，包含重试和错误处理"""
     attempt = 0
+    consecutive_429 = 0
+    
     while attempt < max_attempts:
         attempt += 1
         polite_sleep()  # 全局节流
+        
         with _PER_HOST_LOCK:
             try:
                 headers = {}
                 if referer:
                     headers["Referer"] = referer
                 resp = sess.get(url, timeout=Config.TIMEOUT, headers=headers)
+            except requests.Timeout as e:
+                logging.warning(f"[GET] timeout on {url} (attempt {attempt}/{max_attempts}): {e}")
+                time.sleep(base_sleep * (2 ** (attempt - 1)) + random.uniform(0.3, 0.8))
+                continue
+            except requests.ConnectionError as e:
+                logging.warning(f"[GET] connection error on {url} (attempt {attempt}/{max_attempts}): {e}")
+                time.sleep(base_sleep * (2 ** (attempt - 1)) + random.uniform(0.5, 1.0))
+                continue
             except requests.RequestException as e:
-                logging.debug(f"[GET] exception on {url}: {e}")
+                logging.warning(f"[GET] request exception on {url} (attempt {attempt}/{max_attempts}): {e}")
                 time.sleep(base_sleep * (2 ** (attempt - 1)) + random.uniform(0.2, 0.6))
                 continue
 
         ct = resp.headers.get("Content-Type", "")
+        
         if resp.status_code == 200 and ("text/html" in ct or ct.startswith("text/")):
             time.sleep(Config.SLEEP_AFTER_REQ + random.uniform(0, 0.05))
+            consecutive_429 = 0
             return resp.text
 
+        # 处理429速率限制
         if resp.status_code == 429:
+            consecutive_429 += 1
             ra = resp.headers.get("Retry-After")
+            
             if ra:
                 try:
                     sleep_s = float(ra)
+                    sleep_s = min(sleep_s, Config.MAX_RATE_LIMIT_SLEEP)
                 except ValueError:
-                    sleep_s = base_sleep * (2 ** (attempt - 1))
+                    sleep_s = Config.RATE_LIMIT_BACKOFF * (2 ** (consecutive_429 - 1))
+                    sleep_s = min(sleep_s, Config.MAX_RATE_LIMIT_SLEEP)
             else:
-                sleep_s = base_sleep * (2 ** (attempt - 1))
-            logging.warning(f"[429] {url} -> sleep {sleep_s:.2f}s")
-            time.sleep(sleep_s + random.uniform(0.2, 0.8))
+                sleep_s = Config.RATE_LIMIT_BACKOFF * (2 ** (consecutive_429 - 1))
+                sleep_s = min(sleep_s, Config.MAX_RATE_LIMIT_SLEEP)
+            
+            jitter = random.uniform(0.5, 1.5)
+            total_sleep = sleep_s * jitter
+            
+            logging.warning(f"[429] {url} -> sleep {total_sleep:.2f}s (attempt {attempt}/{max_attempts})")
+            time.sleep(total_sleep)
             continue
 
+        # 服务器错误
         if 500 <= resp.status_code < 600:
             sleep_s = base_sleep * (2 ** (attempt - 1))
-            logging.warning(f"[{resp.status_code}] {url} -> backoff {sleep_s:.2f}s")
-            time.sleep(sleep_s + random.uniform(0.2, 0.8))
+            jitter = random.uniform(0.3, 0.9)
+            total_sleep = sleep_s + jitter
+            logging.warning(f"[{resp.status_code}] {url} -> backoff {total_sleep:.2f}s")
+            time.sleep(total_sleep)
             continue
 
+        # 权限问题
         if resp.status_code in (403, 401):
-            # 被强拦：再试一次，延长等待
-            sleep_s = base_sleep * (2 ** (attempt - 1)) + 0.8
-            logging.warning(f"[{resp.status_code}] {url} -> throttling {sleep_s:.2f}s")
-            time.sleep(sleep_s + random.uniform(0.4, 1.2))
+            sleep_s = base_sleep * (2 ** (attempt - 1)) + 1.0
+            jitter = random.uniform(0.5, 1.5)
+            total_sleep = sleep_s + jitter
+            logging.warning(f"[{resp.status_code}] {url} -> throttling {total_sleep:.2f}s")
+            time.sleep(total_sleep)
             continue
 
-        logging.debug(f"[GET] non-200 {resp.status_code} on {url}")
+        if resp.status_code != 200:
+            logging.warning(f"[GET] HTTP {resp.status_code} on {url}")
+            if attempt < max_attempts:
+                time.sleep(base_sleep + random.uniform(0.2, 0.6))
+                continue
+        
         return None
 
-    logging.error(f"[GET] failed after retries: {url}")
+    logging.error(f"[GET] failed after {max_attempts} attempts: {url}")
     return None
 
 
