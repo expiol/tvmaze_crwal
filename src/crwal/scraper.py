@@ -111,6 +111,74 @@ def _episodes_url_from_show_url(show_url: str) -> str:
 def _clean_list(items: List[str]) -> List[str]:
     return [x.strip() for x in items if x and x.strip()]
 
+def _clean_summary_text(txt: str, title: Optional[str]) -> str:
+    """统一清洗摘要文本：去 HTML、标题前缀、空白等。"""
+    txt = strip_html(txt or "")
+    if not txt:
+        return ""
+    if title:
+        # 去掉以标题开头的冗余，比如 "<b>Title</b> ..." 清洗后是 "Title ..."
+        txt = re.sub(rf"^\s*{re.escape(title)}\s*[:\-–—]?\s*", "", txt, flags=re.I).strip()
+    # 合并空白
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+def extract_summary(soup: BeautifulSoup, title: Optional[str]) -> Optional[str]:
+    MIN_ACCEPT_LEN = 120
+    MIN_TARGET_LEN = 220
+    MAX_JOIN_PARAS = 3
+
+    paras = soup.select("#general-information article p")
+    cand_texts: list[str] = []
+    for p in paras:
+        raw = str(p)
+        clean = _clean_summary_text(raw, title)
+        if not clean:
+            continue
+        low = clean.lower()
+        if any(k in low for k in [
+            "trailer", "promo", "read more", "see more", "tap to", "click to",
+            "official site", "visit", "copyright", "image", "photo", "video", "credits"
+        ]):
+            continue
+        if re.fullmatch(r"(season|episode)\s+\d+(:\s*\w+)?", clean, flags=re.I):
+            continue
+        cand_texts.append(clean)
+
+    def join_until_length(start_idx: int) -> str:
+        joined = [cand_texts[start_idx]]
+        idx = start_idx + 1
+        while idx < len(cand_texts) and len(" ".join(joined)) < MIN_TARGET_LEN and len(joined) < MAX_JOIN_PARAS:
+            joined.append(cand_texts[idx])
+            idx += 1
+        return " ".join(joined)
+
+    if cand_texts:
+        chosen = None
+        for i, t in enumerate(cand_texts):
+            if len(t) >= MIN_ACCEPT_LEN:
+                chosen = join_until_length(i)
+                break
+        if not chosen:
+            chosen = join_until_length(0)
+        return truncate(chosen)
+
+    desc_node = soup.select_one('[itemprop="description"]')
+    if desc_node:
+        desc = _clean_summary_text(str(desc_node), title)
+        if desc:
+            return truncate(desc)
+
+    for sel in ('meta[property="og:description"]', 'meta[name="description"]'):
+        m = soup.select_one(sel)
+        if m and m.get("content"):
+            desc = _clean_summary_text(m["content"], title)
+            if desc:
+                return truncate(desc)
+
+    return None
+
+
 def _safe_normalize_date(date_str: Optional[str]) -> Optional[str]:
     if not date_str:
         return None
@@ -225,15 +293,8 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
             if items:
                 genres = format_genres(items)
 
-    summary = None
-    summary_p = soup.select_one("#general-information article p")
-    if summary_p:
-        summary_html = str(summary_p)
-        txt = strip_html(summary_html)
-        if txt:
-            if title:
-                txt = re.sub(rf"^\s*{re.escape(title)}\s*", "", txt).strip()
-            summary = txt
+    summary = extract_summary(soup, title)
+
 
     return {
         "Title": title,

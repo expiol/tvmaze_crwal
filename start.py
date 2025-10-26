@@ -8,13 +8,10 @@ if __name__ == "__main__":
     # 基础配置
     # =======================
     START_PAGE = 1
-    END_PAGE = 10
+    END_PAGE = 1000
     LOG_PATH = os.path.join("logs", "scrape.log")
 
-    # 当天日期（例如 '2025-10-24'）
     today_str = datetime.date.today().isoformat()
-
-    # 自动生成 data/日期 目录
     DATA_DIR = os.path.join("data", today_str)
     FIG_DIR = os.path.join(DATA_DIR, "figures")
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -39,7 +36,7 @@ if __name__ == "__main__":
             max_workers=10
         )
 
-        visualize(OUT_PATH, FIG_DIR, topk=20)
+        visualize(OUT_PATH, FIG_DIR)
 
         print("\n✓ Complete! Check results:")
         print(f"  - Data saved to: {OUT_PATH}")

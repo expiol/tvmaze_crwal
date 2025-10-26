@@ -1,628 +1,624 @@
+# viz_for_latex.py
 from __future__ import annotations
 
+import argparse
 import json
-import logging
 import os
-from typing import List, Optional, Tuple
-
+from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import re
+import seaborn as sns
+def read_csv(path: str) -> pd.DataFrame:
+    return pd.read_csv(path)
 
-from .util import read_csv, ensure_dir, setup_logging
+def ensure_dir(d: str) -> None:
+    os.makedirs(d, exist_ok=True)
+
+def setup_logging():
+    pass
+# =============================================================================================================
 
 
-# Nature Publishing Group (NPG) color palette
-NPG_CYCLE = [
-    "#E64B35",
-    "#4DBBD5",
-    "#00A087",
-    "#3C5488",
-    "#F39B7F",
-    "#8491B4",
-    "#91D1C2",
-    "#DC0000",
-    "#7E6148",
-    "#B09C85",
+# -------------------------
+# Matplotlib：期刊风格
+# -------------------------
+def configure_matplotlib() -> None:
+    plt.style.use("default")                   # 保持默认风格（满足作业要求）
+    # 统一的期刊化参数（不改变配色主题）
+    plt.rcParams.update({
+        "figure.dpi": 120,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.08,
+        "font.size": 11,
+        "axes.titlesize": 13,
+        "axes.titleweight": "bold",
+        "axes.labelsize": 12,
+        "axes.labelweight": "normal",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
+        "axes.grid": False,   # 期刊常用：无背景网格，如需可改 True 并用浅灰
+        "lines.linewidth": 1.7,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+    # 尝试保证中英兼容的无衬线字体
+    plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial", "Helvetica", "SimHei"] + plt.rcParams.get("font.sans-serif", [])
+    plt.rcParams["axes.unicode_minus"] = False
+
+
+
+def _parse_date(s: Optional[str]) -> Optional[datetime]:
+    if not isinstance(s, str) or not s.strip():
+        return None
+    s = s.strip()
+    try:
+        return datetime.strptime(s, "%Y-%m-%d")
+    except Exception:
+        return None
+
+def _year_from_date_str(s: Optional[str]) -> Optional[int]:
+    dt = _parse_date(s)
+    return dt.year if dt else None
+
+def _status_group(raw: Optional[str]) -> str:
+    if not isinstance(raw, str):
+        return "Other"
+    s = raw.strip().lower()
+    if "ended" in s:
+        return "Ended"
+    if any(k in s for k in ["running", "continuing", "returning", "on hiatus", "in production"]):
+        return "Running"
+    if any(k in s for k in ["to be determined", "tbd", "unknown", "pending"]):
+        return "To Be Determined"
+    return "Other"
+
+
+BROADCAST = [
+    "abc","cbs","nbc","fox","the cw","pbs",
+    "bbc one","bbc two","bbc three","bbc four","itv","channel 4","channel 5",
+]
+CABLE_PREMIUM = [
+    "hbo","showtime","starz","amc","fx","fxx","usa network","syfy","tnt","tbs",
+    "a&e","history","bravo","comedy central","mtv","vh1","e!","hallmark","freeform",
+    "nickelodeon","cartoon network","adult swim","discovery channel","national geographic",
+    "nat geo","hgtv","food network","bbc america","sky one","sky atlantic","tv land",
+]
+STREAMERS = [
+    "netflix","amazon","prime video","hulu","disney+","apple tv+","paramount+","peacock","max",
+    "discovery+","amc+","crave","stan","itvx","bbc iplayer","hotstar","jiocinema","viu","iqiyi","tencent","youku",
 ]
 
-# Semantic color definitions
-NPG = {
-    "primary":   "#3C5488",
-    "secondary": "#E64B35",
-    "success":   "#00A087",
-    "warning":   "#F39B7F",
-    "info":      "#4DBBD5",
-    "purple":    "#8491B4",
-    "teal":      "#91D1C2",
-    "scarlet":   "#DC0000",
-    "brown":     "#7E6148",
-    "beige":     "#B09C85",
-    "dark_gray": "#2C2C2C",
-    "light_gray":"#E5E5E5",
-}
+def _platform_type_from_network(net: Optional[str]) -> str:
+    if not isinstance(net, str) or not net.strip():
+        return "Other"
+    s = net.strip().lower()
+    if any(k in s for k in STREAMERS):
+        return "Streamer"
+    if any(k in s for k in BROADCAST):
+        return "Broadcast"
+    if any(k in s for k in CABLE_PREMIUM):
+        return "Cable/Premium"
+    return "Other"
 
-
-# Configure matplotlib style
-def configure_matplotlib() -> None:
-    """Configure matplotlib with Nature journal style"""
-    try:
-        fonts = [
-            'Arial',
-            'Helvetica',
-            'DejaVu Sans',
-            'SimHei',
-            'Heiti TC',
-            'WenQuanYi Micro Hei',
-            'STHeiti',
-            'Arial Unicode MS',
-        ]
-        for font in fonts:
-            try:
-                plt.rcParams['font.sans-serif'] = [font] + plt.rcParams.get('font.sans-serif', [])
-                break
-            except Exception:
-                continue
-        plt.rcParams['axes.unicode_minus'] = False
-    except Exception as e:
-        logging.warning(f"Font configuration warning: {e}")
-
-    plt.rcParams.update({
-        'figure.dpi': 120,
-        'savefig.dpi': 300,
-        'figure.facecolor': 'white',
-        'savefig.facecolor': 'white',
-        'savefig.bbox': 'tight',
-        'savefig.pad_inches': 0.1,
-        'savefig.format': 'png',
-        'font.family': 'sans-serif',
-        'font.size': 11,
-        'axes.labelsize': 12,
-        'axes.titlesize': 13,
-        'axes.titleweight': 'bold',
-        'axes.labelweight': 'normal',
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 10,
-        'axes.facecolor': 'white',
-        'axes.edgecolor': NPG['dark_gray'],
-        'axes.linewidth': 1.2,
-        'axes.grid': False,
-        'axes.axisbelow': True,
-        'axes.spines.top': False,
-        'axes.spines.right': False,
-        'axes.spines.left': True,
-        'axes.spines.bottom': True,
-        'xtick.direction': 'out',
-        'ytick.direction': 'out',
-        'xtick.major.size': 5,
-        'ytick.major.size': 5,
-        'xtick.minor.size': 3,
-        'ytick.minor.size': 3,
-        'xtick.major.width': 1.0,
-        'ytick.major.width': 1.0,
-        'xtick.color': NPG['dark_gray'],
-        'ytick.color': NPG['dark_gray'],
-        'lines.linewidth': 2.0,
-        'lines.markersize': 6,
-        'lines.markeredgewidth': 0.8,
-        'legend.frameon': False,
-        'legend.loc': 'best',
-        'legend.fancybox': False,
-        'grid.color': NPG['light_gray'],
-        'grid.linestyle': '--',
-        'grid.linewidth': 0.5,
-        'grid.alpha': 0.7,
-        'pdf.fonttype': 42,
-        'ps.fonttype': 42,
-        'svg.fonttype': 'none',
-    })
-
-    plt.rcParams['axes.prop_cycle'] = plt.cycler(color=NPG_CYCLE)
-
-
-def _set_axes(ax: plt.Axes, xlabel: str = None, ylabel: str = None, title: str = None) -> None:
-    """Set axes style"""
-    ax.minorticks_on()
-    ax.tick_params(axis='both', which='major', direction='out', length=5, width=1.0, pad=4, labelsize=10, colors=NPG['dark_gray'])
-    ax.tick_params(axis='both', which='minor', direction='out', length=3, width=0.8, colors=NPG['dark_gray'])
-    
-    for spine in ['left', 'bottom']:
-        ax.spines[spine].set_linewidth(1.2)
-        ax.spines[spine].set_color(NPG['dark_gray'])
-    for spine in ['right', 'top']:
-        ax.spines[spine].set_visible(False)
-    
-    if xlabel:
-        ax.set_xlabel(xlabel, fontsize=12, fontweight='normal', color=NPG['dark_gray'])
-    if ylabel:
-        ax.set_ylabel(ylabel, fontsize=12, fontweight='normal', color=NPG['dark_gray'])
-    if title:
-        ax.set_title(title, pad=12, fontsize=13, fontweight='bold', color=NPG['dark_gray'])
-
-
-def _footnote(ax: plt.Axes, text: str) -> None:
-    """Add footnote to chart"""
-    ax.figure.text(0.01, 0.01, text, ha='left', va='bottom', fontsize=8, color='#666666', style='italic', alpha=0.8)
-
-
-# Data processing functions
-def parse_genres_cell(cell: str) -> List[str]:
-    if not isinstance(cell, str) or not cell:
+def _parse_genres(cell: Optional[str]) -> List[str]:
+    if not isinstance(cell, str) or not cell.strip():
         return []
-    try:
-        data = json.loads(cell)
-        return [str(x) for x in data] if isinstance(data, list) else []
-    except Exception:
-        return [x.strip() for x in cell.split(",") if x.strip()]
-
-
-def add_year_columns(df: pd.DataFrame) -> pd.DataFrame:
-    def to_year(s: str) -> float:
-        if not isinstance(s, str) or not s:
-            return np.nan
+    c = cell.strip()
+    # 兼容 JSON 列表字符串或者逗号分隔
+    if c.startswith("[") and c.endswith("]"):
         try:
-            y = int(s[:4])
-            if 1900 <= y <= 2100:
-                return float(y)
+            arr = json.loads(c)
+            return [str(x).strip() for x in arr if str(x).strip()]
         except Exception:
-            return np.nan
-        return np.nan
+            pass
+    return [x.strip() for x in c.split(",") if x.strip()]
 
-    df = df.copy()
-    # 注意：仅从 First air date 推出 Year，避免把 End date (含占位9999) 误用
-    if "First air date" in df.columns:
-        df["Year"] = df["First air date"].apply(to_year)
-    else:
-        df["Year"] = np.nan
-    return df
-
-
-def explode_genres(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    if "Genres" not in df.columns:
-        df["Genres"] = ""
-    df["Genres_list"] = df["Genres"].apply(parse_genres_cell)
-    df_exploded = df.explode("Genres_list").rename(columns={"Genres_list": "Genre"})
-    return df_exploded.dropna(subset=["Genre"])
-
-
-# Statistical tools
-def _auto_bins(vals: np.ndarray, max_bins: int = 50) -> int:
-    if len(vals) < 2:
-        return 5
-    q75, q25 = np.percentile(vals, [75, 25])
+def _freedman_diaconis_bins(vals: np.ndarray, max_bins: int = 50) -> int:
+    v = np.asarray(vals, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 2:
+        return 10
+    q75, q25 = np.percentile(v, [75, 25])
     iqr = max(q75 - q25, 1e-9)
-    bin_width = 2 * iqr * (len(vals) ** (-1/3))
-    if bin_width <= 0:
-        return min(20, len(np.unique(vals)))
-    bins = int(np.ceil((vals.max() - vals.min()) / bin_width))
+    bw = 2 * iqr * (v.size ** (-1/3))
+    if bw <= 0:
+        return min(20, len(np.unique(v)))
+    bins = int(np.ceil((v.max() - v.min()) / bw))
     return max(5, min(bins, max_bins))
 
-
-def _bootstrap_ci_mean(vals: np.ndarray, n_boot: int = 4000, alpha: float = 0.05, seed: int = 42) -> Tuple[float, float, float]:
-    vals = np.asarray(vals, dtype=float)
-    vals = vals[np.isfinite(vals)]
-    if vals.size == 0:
+def _bootstrap_ci_mean(vals: np.ndarray, n_boot: int = 3000, alpha: float = 0.05, seed: int = 42) -> Tuple[float, float, float]:
+    v = np.asarray(vals, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
         return (np.nan, np.nan, np.nan)
     rng = np.random.default_rng(seed)
-    n = len(vals)
-    boots = np.empty(n_boot, dtype=float)
-    for i in range(n_boot):
-        idx = rng.integers(0, n, n)
-        boots[i] = vals[idx].mean()
-    mean = float(vals.mean())
+    n = v.size
+    boots = rng.choice(v, size=(n_boot, n), replace=True).mean(axis=1)
+    mean = float(v.mean())
     low = float(np.quantile(boots, alpha/2))
     high = float(np.quantile(boots, 1 - alpha/2))
-    return (mean, low, high)
+    return mean, low, high
 
-
-def _permutation_test_diff_means(x: np.ndarray, y: np.ndarray, n_perm: int = 10000, seed: int = 123) -> float:
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    x = x[np.isfinite(x)]
-    y = y[np.isfinite(y)]
-    if x.size == 0 or y.size == 0:
-        return np.nan
-    obs = abs(x.mean() - y.mean())
-    rng = np.random.default_rng(seed)
-    combined = np.concatenate([x, y])
-    n_x = len(x)
-    count = 0
-    for _ in range(n_perm):
-        rng.shuffle(combined)
-        diff = abs(combined[:n_x].mean() - combined[n_x:].mean())
-        if diff >= obs - 1e-12:
-            count += 1
-    return (count + 1) / (n_perm + 1)  # add-one smoothing
-
-
-# Platform identification (Streaming vs TV)
-STREAMING_KEYWORDS = [
-    "Netflix", "Amazon", "Prime", "Hulu", "Disney", "Apple TV", "AppleTV", "Apple+",
-    "HBO Max", "Max", "Paramount", "Paramount+", "Peacock", "Discovery", "Discovery+",
-    "AMC+", "Showtime", "Starz", "BBC iPlayer", "ITVX", "Crave", "Stan",
-    "Hotstar", "Jiocinema", "Viu", "iQIYI", "Tencent", "Youku"
-]
-
-
-def _platform_from_network(network: str) -> str:
-    if not isinstance(network, str) or not network.strip():
-        return "Unknown"
-    s = network.lower()
-    for kw in STREAMING_KEYWORDS:
-        if kw.lower() in s:
-            return "Streaming"
-    return "TV"
-
-
-# Visualization charts with Nature color scheme
-def fig_top_rated(df: pd.DataFrame, k: int, save_path: str) -> None:
-    """Generate horizontal bar chart of top K rated shows"""
-    if "Rating" not in df.columns or "Title" not in df.columns:
-        logging.warning("Missing required columns for top_rated chart")
-        return
-    
-    data = df.dropna(subset=["Rating"]).sort_values("Rating", ascending=False).head(k)
-    if data.empty:
-        logging.warning("No data available for top_rated chart")
-        return
-
-    fig, ax = plt.subplots(figsize=(11, max(6, int(k * 0.45))))
-    titles = data["Title"].astype(str).values[::-1]
-    ratings = data["Rating"].astype(float).values[::-1]
-    y = np.arange(len(titles))
-
-    colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(titles))]
-    bars = ax.barh(y, ratings, color=colors[::-1], edgecolor=NPG['dark_gray'], 
-                   linewidth=1.0, height=0.75, alpha=0.85)
-    
-    ax.set_yticks(y, labels=[f"{i+1}. {t}" for i, t in enumerate(titles)], fontsize=10)
-    ax.set_xlim(0, 10.5)
-
-    for i, r in enumerate(ratings):
-        ax.text(min(r + 0.15, 10.3), i, f"{r:.1f}", 
-                va='center', ha='left', fontsize=9, 
-                color=NPG['dark_gray'], fontweight='bold')
-
-    _set_axes(ax, xlabel="Rating (0-10)", title=f"Top {k} Highest Rated TV Shows")
-    _footnote(ax, f"Sample size: n={len(data)}")
-    fig.tight_layout()
-    fig.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    logging.info(f"Saved: {save_path}")
-
-
-def fig_rating_hist(df: pd.DataFrame, bins: Optional[int], save_path: str) -> None:
-    """Generate rating distribution histogram with mean and median lines"""
-    if "Rating" not in df.columns:
-        logging.warning("Missing Rating column for histogram")
-        return
-    
-    vals = df["Rating"].dropna().values
-    if len(vals) == 0:
-        logging.warning("No rating data available for histogram")
-        return
-
-    bins_used = bins if isinstance(bins, int) and bins > 0 else _auto_bins(vals)
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-
-    n, bins_edges, patches = ax.hist(
-        vals, bins=bins_used, 
-        color=NPG["info"], 
-        edgecolor=NPG['dark_gray'], 
-        linewidth=0.9,
-        alpha=0.75
-    )
-    
-    mean_val, median_val, std_val = vals.mean(), np.median(vals), vals.std()
-
-    ax.axvline(mean_val, color=NPG["primary"], linestyle='--', 
-               linewidth=2.2, label=f"Mean: {mean_val:.2f}", alpha=0.9)
-    ax.axvline(median_val, color=NPG["secondary"], linestyle='-.', 
-               linewidth=2.0, label=f"Median: {median_val:.2f}", alpha=0.9)
-    
-    ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
-
-    _set_axes(ax, xlabel="Rating (0-10)", ylabel="Frequency", 
-              title="Distribution of TV Show Ratings")
-    _footnote(ax, f"n={len(vals)}, mean={mean_val:.2f}, std={std_val:.2f}")
-    fig.tight_layout()
-    fig.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    logging.info(f"Saved: {save_path}")
-
-
-def fig_status_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 3) -> None:
-    """Status vs average rating with 95% CI"""
-    if "Status" not in df.columns or "Rating" not in df.columns:
-        return
-    g = df.groupby("Status", dropna=False)["Rating"]
-    rows = []
-    for name, s in g:
-        arr = s.dropna().values
-        if len(arr) < min_group_n:
-            continue
-        mean, low, high = _bootstrap_ci_mean(arr)
-        rows.append((str(name) if name is not None else "Unknown", mean, low, high, len(arr)))
-    if not rows:
-        return
-    tbl = pd.DataFrame(rows, columns=["Status", "Mean", "Low", "High", "n"]).sort_values("Mean", ascending=False)
-
-    fig, ax = plt.subplots(figsize=(9.8, 6.2))
-    x = np.arange(len(tbl))
-    bar_colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(tbl))]
-
-    ax.bar(x, tbl["Mean"].values, color=bar_colors, edgecolor="#222", linewidth=0.8, width=0.75)
-    yerr = np.vstack([tbl["Mean"].values - tbl["Low"].values, tbl["High"].values - tbl["Mean"].values])
-    ax.errorbar(x, tbl["Mean"].values, yerr=yerr, fmt='none', ecolor="#222", elinewidth=1.2, capsize=3)
-
-    ax.set_xticks(x, labels=tbl["Status"].astype(str).values, rotation=15, ha='right')
-    _set_axes(ax, ylabel="Average Rating", title="Average Rating by Status (95% CI)")
-
-    overall = float(df["Rating"].mean())
-    ax.axhline(overall, color="#666", linestyle='--', linewidth=1.2, label=f"Overall mean {overall:.2f}")
-    ax.legend(loc='lower right', fontsize=9)
-
-    for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
-        ax.text(i, m + 0.15, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
-
-    run_vals = df[df["Status"].fillna("").str.contains("Running", case=False, na=False)]["Rating"].dropna().values
-    end_vals = df[df["Status"].fillna("").str.contains("Ended", case=False, na=False)]["Rating"].dropna().values
-    if len(run_vals) > 0 and len(end_vals) > 0:
-        p = _permutation_test_diff_means(run_vals, end_vals)
-        _footnote(ax, f"Groups with n>={min_group_n}. Permutation test p-value (Running vs Ended) = {p:.4f}")
-    else:
-        _footnote(ax, f"Groups with n>={min_group_n}")
-
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def fig_genre_mean_rating(df: pd.DataFrame, topn: int, save_path: str, min_count: int = 5) -> None:
-    """Genre average rating (Top-N with 95% CI)"""
-    if "Genres" not in df.columns or "Rating" not in df.columns:
-        return
-    dfg = explode_genres(df)
-    if dfg.empty:
-        return
-
-    rows = []
-    for gname, s in dfg.groupby("Genre")["Rating"]:
-        vals = s.dropna().values
-        if len(vals) < min_count:
-            continue
-        mean, low, high = _bootstrap_ci_mean(vals)
-        rows.append((gname, mean, low, high, len(vals)))
-    if not rows:
-        return
-    tbl = pd.DataFrame(rows, columns=["Genre", "Mean", "Low", "High", "n"]).sort_values(["Mean", "n"], ascending=[False, False]).head(topn)
-
-    fig, ax = plt.subplots(figsize=(11.5, 7.0))
-    x = np.arange(len(tbl))
-    bar_colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(tbl))]
-
-    ax.bar(x, tbl["Mean"].values, color=bar_colors, edgecolor="#222", linewidth=0.8, width=0.72)
-    yerr = np.vstack([tbl["Mean"].values - tbl["Low"].values, tbl["High"].values - tbl["Mean"].values])
-    ax.errorbar(x, tbl["Mean"].values, yerr=yerr, fmt='none', ecolor="#222", elinewidth=1.2, capsize=3)
-
-    ax.set_xticks(x, labels=tbl["Genre"].astype(str).values, rotation=28, ha='right')
-    _set_axes(ax, ylabel="Average Rating", title=f"Top {len(tbl)} Genres by Average Rating (min n={min_count})")
-
-    overall = float(df["Rating"].mean())
-    ax.axhline(overall, color="#666", linestyle='--', linewidth=1.2, label=f"Overall mean {overall:.2f}")
-    ax.legend(loc='lower right', fontsize=9)
-
-    for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
-        ax.text(i, m + 0.12, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
-
-    _footnote(ax, f"Error bars: 95% bootstrap CI. Min sample size: {min_count}")
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def fig_year_counts(df: pd.DataFrame, save_path: str) -> None:
-    """Premiere year trend"""
-    if "First air date" not in df.columns:
-        return
-    dfy = add_year_columns(df)
-    agg = dfy.groupby("Year").size().dropna().sort_index()
-    if len(agg) == 0:
-        return
-
-    x = agg.index.values.astype(float)
-    y = agg.values.astype(float)
-
-    fig, ax = plt.subplots(figsize=(11.5, 6.5))
-    ax.plot(x, y, marker='o', color=NPG["primary"], linewidth=1.9, markersize=4.8)
-    ax.fill_between(x, y, step='pre', color=NPG["teal"], alpha=0.25)
-
-    if len(agg) >= 3:
-        z = np.polyfit(x, y, 2)
-        p = np.poly1d(z)
-        ax.plot(x, p(x), linestyle='--', color=NPG["secondary"], linewidth=1.3, label='Polynomial trend')
-        ax.legend(loc='best', fontsize=9)
-    elif len(agg) == 2:
-        z = np.polyfit(x, y, 1)
-        p = np.poly1d(z)
-        ax.plot(x, p(x), linestyle='--', color=NPG["secondary"], linewidth=1.3, label='Linear trend')
-        ax.legend(loc='best', fontsize=9)
-
-    max_year, max_count = int(agg.idxmax()), int(agg.max())
-    ax.annotate(f"Peak: {max_count} in {max_year}",
-                xy=(max_year, max_count), xytext=(12, 12), textcoords='offset points',
-                arrowprops=dict(arrowstyle='->', lw=1.2, color=NPG["primary"]),
-                fontsize=9, color="#111")
-
-    _set_axes(ax, xlabel="Premiere Year", ylabel="Number of Shows", title="TV Show Premiere Trend Over Time")
-    _footnote(ax, f"Based on available premiere dates. n={len(agg)} years")
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def fig_network_topn(df: pd.DataFrame, topn: int, save_path: str) -> None:
-    """Network show count (Top-N)"""
-    if "Network" not in df.columns:
-        return
-    cnt = df["Network"].fillna("").replace("", "Unknown").value_counts().head(topn)
-    if len(cnt) == 0:
-        return
-
-    fig, ax = plt.subplots(figsize=(12.0, 6.8))
-    x = np.arange(len(cnt))
-    bar_colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(cnt))]
-
-    ax.bar(x, cnt.values, color=bar_colors, edgecolor="#222", linewidth=0.8, width=0.72)
-    ax.set_xticks(x, labels=cnt.index.astype(str), rotation=35, ha='right')
-
-    for i, v in enumerate(cnt.values):
-        ax.text(i, v + max(cnt.values) * 0.01, f"{int(v)}", ha='center', va='bottom', fontsize=9, color="#111")
-
-    _set_axes(ax, ylabel="Number of Shows", title=f"Top {topn} Networks/Channels by Show Count")
-    _footnote(ax, f"Top {topn} networks. Total: {int(cnt.sum())} shows")
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def fig_genre_boxplot(df: pd.DataFrame, topk_genres: int, save_path: str) -> None:
-    """Genre rating distribution boxplot (Top-k genres)"""
-    if "Genres" not in df.columns or "Rating" not in df.columns:
-        return
-    dfg = explode_genres(df)
-    if len(dfg) == 0:
-        return
-
-    top_genres = dfg["Genre"].value_counts().head(topk_genres).index.tolist()
-    data = [dfg.loc[dfg["Genre"] == g, "Rating"].dropna().values for g in top_genres]
-    valid = [(g, d) for g, d in zip(top_genres, data) if len(d) > 0]
-    if not valid:
-        return
-
-    labels, series = zip(*valid)
-    fig, ax = plt.subplots(figsize=(11.8, 7.2))
-
-    colors = [NPG_CYCLE[i % len(NPG_CYCLE)] for i in range(len(labels))]
-    bp = ax.boxplot(series, labels=labels, patch_artist=True, showmeans=True,
-                    boxprops=dict(facecolor='white', edgecolor="#222", linewidth=1.2),
-                    medianprops=dict(color="#222", linewidth=1.6),
-                    meanprops=dict(marker='D', markerfacecolor=NPG["primary"], markeredgecolor="#222",
-                                   markersize=5.5, markeredgewidth=0.8),
-                    whiskerprops=dict(linewidth=1.2, color="#222"),
-                    capprops=dict(linewidth=1.2, color="#222"),
-                    flierprops=dict(marker='o', markerfacecolor=NPG["teal"], markeredgecolor='none', markersize=4, alpha=0.6))
-    for patch, c in zip(bp['boxes'], colors):
-        try:
-            patch.set_facecolor(c + "20")
-        except Exception:
-            patch.set_facecolor(c)
-            patch.set_alpha(0.25)
-
-    _set_axes(ax, ylabel="Rating", title=f"Rating Distribution by Genre (Top {topk_genres} by count)")
-    _footnote(ax, f"Box=IQR, line=median, diamond=mean. Top {topk_genres} genres by frequency")
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def fig_platform_mean_rating(df: pd.DataFrame, save_path: str, min_group_n: int = 5) -> None:
-    """Platform comparison (Streaming vs TV) with 95% CI"""
-    if "Network" not in df.columns or "Rating" not in df.columns:
-        return
+def derive_variables(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
-    d["Platform"] = d["Network"].apply(_platform_from_network)
+
+    # 只用 8 列，容错补列
+    for c in ["Title","First air date","End date","Rating","Genres","Status","Network","Summary"]:
+        if c not in d.columns:
+            d[c] = np.nan
+
+    # 类型/清洗
+    d["Rating"] = pd.to_numeric(d["Rating"], errors="coerce")
+    # 占位 End date（如 9999-12-31）处理为缺失
+    d["End date"] = d["End date"].replace({"9999-12-31": np.nan, "9999/12/31": np.nan})
+
+    # StatusGroup
+    d["StatusGroup"] = d["Status"].apply(_status_group)
+
+    # YearFirst / YearEnd
+    d["YearFirst"] = d["First air date"].apply(_year_from_date_str)
+    d["YearEnd"] = d["End date"].apply(_year_from_date_str)
+
+    # YearsActive（若 End 缺失且非 Ended，用今天日期近似）
+    def _years_active(row) -> Optional[float]:
+        fst = _parse_date(row.get("First air date"))
+        if not fst:
+            return np.nan
+        end_raw = row.get("End date")
+        end_dt = _parse_date(end_raw)
+        if end_dt is None and row.get("StatusGroup") != "Ended":
+            end_dt = datetime.combine(date.today(), datetime.min.time())
+        if end_dt is None:
+            return np.nan
+        return max(0.0, (end_dt - fst).days / 365.25)
+
+    d["YearsActive"] = d.apply(_years_active, axis=1)
+
+    # PlatformType
+    d["PlatformType"] = d["Network"].apply(_platform_type_from_network)
+
+    # NumGenres
+    d["NumGenres"] = d["Genres"].apply(lambda x: len(_parse_genres(x)))
+
+    return d
+
+
+# -------------------------
+# 各图生成函数（文件名与 LaTeX 一致）
+# -------------------------
+def fig_rating_hist(d: pd.DataFrame, out_path: str) -> None:
+    vals = d["Rating"].dropna().values
+    if vals.size == 0: return
+    bins = _freedman_diaconis_bins(vals)
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    ax.hist(vals, bins=bins, alpha=0.85, edgecolor="#222222", linewidth=0.8)
+    mean, median = vals.mean(), np.median(vals)
+    ax.axvline(mean, linestyle="--", linewidth=1.8, label=f"Mean {mean:.2f}")
+    ax.axvline(median, linestyle="-.", linewidth=1.6, label=f"Median {median:.2f}")
+    ax.set_xlabel("Rating (0–10)")
+    ax.set_ylabel("Count")
+    ax.set_title("Distribution of Ratings")
+    ax.legend(loc="upper left", frameon=False)
+    fig.savefig(out_path); plt.close(fig)
+
+def fig_avg_rating_by_genre(
+    d: pd.DataFrame,
+    out_path: str,
+    top_n: int = 12,
+    min_n: int = 5,
+    show_counts: str = "none",   # "xtick" | "above" | "none"
+    sort_by: str = "mean",        # "mean" | "freq"
+    save_svg: bool = True,
+) -> None:
+    """
+    画“不同 Genre 的平均评分 + 95%CI”的期刊风格柱状图。
+    - show_counts: n 的展示位置；"xtick" 放到 x 轴标签中，"above" 放到柱顶，"none" 不显示
+    - sort_by: 输出表的排序方式；"mean" 按均值降序，"freq" 按样本量降序
+    """
+    # -------- 样式（近似期刊风） --------
+    plt.rcParams.update({
+        "font.size": 10,
+        "axes.labelsize": 11,
+        "axes.titlesize": 12,
+        "axes.linewidth": 0.8,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.major.size": 3,
+        "ytick.major.size": 3,
+        "grid.color": "#808080",
+        "grid.linestyle": "--",
+        "grid.linewidth": 0.5,
+        "grid.alpha": 0.35,
+        "figure.dpi": 150,
+        "savefig.dpi": 300,
+    })
+
+    # -------- 数据处理 --------
+    dd = d.copy()
+    dd["__genres"] = dd["Genres"].apply(_parse_genres)
+    dd = dd.explode("__genres").rename(columns={"__genres": "Genre"}).dropna(subset=["Genre"])
+    if dd.empty:
+        return
+
+    freq = dd["Genre"].value_counts()
+    cand = freq.head(top_n).index.tolist()
 
     rows = []
-    for name, s in d.groupby("Platform")["Rating"]:
-        vals = s.dropna().values
-        if len(vals) < min_group_n:
-            continue
-        mean, low, high = _bootstrap_ci_mean(vals)
-        rows.append((name, mean, low, high, len(vals)))
+    for g in cand:
+        x = dd.loc[dd["Genre"] == g, "Rating"].dropna().values
+        if x.size >= min_n:
+            m, lo, hi = _bootstrap_ci_mean(x)
+            rows.append((g, m, lo, hi, x.size))
     if not rows:
         return
-    tbl = pd.DataFrame(rows, columns=["Platform", "Mean", "Low", "High", "n"]).sort_values("Mean", ascending=False)
 
-    fig, ax = plt.subplots(figsize=(9.5, 6.0))
-    x = np.arange(len(tbl))
-    colors = [NPG["success"] if p == "Streaming" else NPG["primary"] for p in tbl["Platform"].values]
-
-    ax.bar(x, tbl["Mean"].values, color=colors, edgecolor="#222", linewidth=0.8, width=0.7)
-    yerr = np.vstack([tbl["Mean"].values - tbl["Low"].values, tbl["High"].values - tbl["Mean"].values])
-    ax.errorbar(x, tbl["Mean"].values, yerr=yerr, fmt='none', ecolor="#222", elinewidth=1.2, capsize=3)
-
-    ax.set_xticks(x, labels=tbl["Platform"].astype(str).values, rotation=0, ha='center')
-    _set_axes(ax, ylabel="Average Rating", title="Average Rating by Platform (95% CI)")
-
-    overall = float(d["Rating"].mean())
-    ax.axhline(overall, color="#666", linestyle='--', linewidth=1.1, label=f"Overall mean {overall:.2f}")
-    ax.legend(loc='lower right', fontsize=9)
-
-    for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
-        ax.text(i, m + 0.12, f"n={n}", ha='center', va='bottom', fontsize=8, color="#111")
-
-    s_vals = d[d["Platform"] == "Streaming"]["Rating"].dropna().values
-    t_vals = d[d["Platform"] == "TV"]["Rating"].dropna().values
-    if len(s_vals) >= min_group_n and len(t_vals) >= min_group_n:
-        p = _permutation_test_diff_means(s_vals, t_vals)
-        _footnote(ax, f"Permutation test p-value (Streaming vs TV) = {p:.4f}. Groups with n>={min_group_n}")
+    tbl = pd.DataFrame(rows, columns=["Genre","Mean","Low","High","n"])
+    if sort_by == "freq":
+        tbl = tbl.sort_values("n", ascending=False)
     else:
-        _footnote(ax, f"Groups with n>={min_group_n}")
+        tbl = tbl.sort_values("Mean", ascending=False).reset_index(drop=True)
+
+    # -------- 调色：低饱和度多色（避免单调又不过于花哨）--------
+    def _palette(n, cmap_name="tab20"):
+        cmap = plt.get_cmap(cmap_name)
+        # 采样时留出两端，避免极端明度
+        return [cmap(i) for i in np.linspace(0.05, 0.95, n)]
+    colors = _palette(len(tbl))
+
+    # -------- 绘图 --------
+    fig_w = max(7.6, 0.55 * len(tbl) + 3.2)   # 自适应宽度，避免挤在一起
+    fig, ax = plt.subplots(figsize=(fig_w, 4.8))
+
+    x = np.arange(len(tbl))
+    bar_kwargs = dict(width=0.7, edgecolor="#222222", linewidth=0.8, alpha=0.95)
+    for i, (m, c) in enumerate(zip(tbl["Mean"].values, colors)):
+        ax.bar(i, m, color=c, **bar_kwargs)
+
+    # 误差线（95% CI）
+    y = tbl["Mean"].values
+    yerr = np.vstack([y - tbl["Low"].values, tbl["High"].values - y])
+    ax.errorbar(x, y, yerr=yerr, fmt="none", ecolor="#222222", elinewidth=1.0, capsize=3, zorder=3)
+
+    # x 轴标签与 n 的展示
+    if show_counts == "xtick":
+        xticklabels = [f"{g}\n(n={n})" for g, n in zip(tbl["Genre"], tbl["n"])]
+    else:
+        xticklabels = tbl["Genre"].tolist()
+    ax.set_xticks(x, labels=xticklabels, rotation=28, ha="right")
+
+    # 柱顶标注 n
+    if show_counts == "above":
+        for i, (m, n) in enumerate(zip(tbl["Mean"].values, tbl["n"].values)):
+            ax.text(i, m + (0.015 * (tbl["High"].max() - tbl["Low"].min())), f"n={n}",
+                    ha="center", va="bottom", fontsize=9)
+
+    ax.set_ylabel("Average Rating")
+    ax.set_title("Average Rating by Genre (Top by frequency)")
+
+    # 仅保留左/下脊柱，去除上/右脊柱
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+
+    # y 轴网格（细、浅）
+    ax.yaxis.grid(True)
+    ax.xaxis.grid(False)
+
+    # 合理的 y 轴范围与刻度
+    y_min = max(0, (tbl["Low"].min() - 0.1))
+    y_max = min(10, (tbl["High"].max() + 0.1)) if np.isfinite(tbl["High"].max()) else tbl["High"].max()
+    if np.isfinite(y_min) and np.isfinite(y_max) and (y_max > y_min):
+        ax.set_ylim(y_min, y_max)
 
     fig.tight_layout()
-    fig.savefig(save_path)
+
+    fig.savefig(out_path, bbox_inches="tight", format="png")
+    plt.close(fig)
+from typing import Tuple, Iterable, Literal, Optional
+def _normalize_status(x: str) -> str:
+    """
+    Normalize status group names to a standardized set.
+    """
+    s = str(x).strip().lower()
+    if re.match(r'^\s*running\b', s):
+        return "Running"
+    if re.search(r'\b(ended|complete|completed|finished|closed)\b', s):
+        return "Ended"
+    if re.search(r'\b(to\s*be\s*determined|tbd|tba|pending|unknown)\b', s):
+        return "To Be Determined"
+    if s in {"ended", "running", "other"}:
+        return s.title()
+    if s == "to be determined":
+        return "To Be Determined"
+    return "Other"
+
+def _resolve_order(present_labels: Iterable[str], order_hint: Iterable[str]):
+    """
+    Resolve and order status labels based on a provided order hint.
+    """
+    base = list(order_hint)
+    present = list(present_labels)
+    ordered = [g for g in base if g in present]
+    extras = [g for g in present if g not in base]
+    return ordered + extras
+
+def fig_box_rating_by_status(
+    d: pd.DataFrame,
+    out_path: str,
+    order: Tuple[str, ...] = ("Ended", "Running", "To Be Determined", "Other"),
+    title: str = "Ratings by StatusGroup",
+    style: str = "box",  # "box" or "violin"
+    dpi: int = 150,
+    *,
+    column: Literal["single", "double"] = "single",
+    ratio: float = 0.62,
+    palette: Literal["mono", "deep"] = "deep",  # Change to a valid palette
+    export_also: Optional[Literal["pdf", "svg", "png"]] = "pdf",
+) -> None:
+    """
+    Generate a plot showing the ratings distribution by status group with enhanced professional styling.
+    Optimized for large datasets (e.g., 8000+ entries).
+    """
+    required = {"StatusGroup", "Rating"}
+    if not required.issubset(d.columns):
+        raise ValueError("DataFrame needs to contain 'StatusGroup' and 'Rating' columns.")
+
+    # Clean data
+    df = d.copy()
+    df["StatusGroupClean"] = df["StatusGroup"].map(_normalize_status)
+    df = df.dropna(subset=["Rating"])
+    if df.empty:
+        return  # No valid data to plot
+
+    # Order status groups as per input
+    labels = _resolve_order(df["StatusGroupClean"].unique().tolist(), order)
+    groups = [df.loc[df["StatusGroupClean"] == name, "Rating"].dropna().values for name in labels]
+    filtered = [(lab, arr) for lab, arr in zip(labels, groups) if arr.size > 0]
+    if not filtered:
+        return
+    labels, groups = map(list, zip(*filtered))
+
+    # Set figure size based on column choice (single or double column for publication)
+    width_mm = 88 if column == "single" else 180
+    figsize = (width_mm / 25.4, (width_mm / 25.4) * ratio)
+
+    # Set rcParams for publication style
+    plt.rcParams.update({
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "axes.linewidth": 0.8,
+        "axes.labelsize": 9,  # Increase label size for better visibility
+        "axes.titlesize": 10,  # Increase title size for better visibility
+        "xtick.labelsize": 8,  # Increase tick size for clarity
+        "ytick.labelsize": 8,  # Increase tick size for clarity
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 5,
+        "ytick.major.size": 5,
+        "xtick.minor.size": 3,
+        "ytick.minor.size": 3,
+        "axes.grid": False,  # No gridlines by default for clean look
+    })
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    # Use Seaborn's boxplot or violinplot for a more polished look
+    if style.lower() == "violin":
+        # Subsample data for jitter to avoid crowding
+        sample_size = min(500, len(df))  # Limit the jittered points to 500 for large datasets
+        sampled_df = df.sample(n=sample_size, random_state=42)
+
+        sns.violinplot(
+            data=sampled_df, x="StatusGroupClean", y="Rating", order=labels,
+            palette=palette, inner=None, linewidth=1.2, ax=ax
+        )
+
+        # Add scatter points (jitter) on top of the violin plot
+        sns.stripplot(
+            data=sampled_df, x="StatusGroupClean", y="Rating", order=labels,
+            color="black", size=3, jitter=True, alpha=0.5, edgecolor="none", ax=ax
+        )
+
+        # Add mean and median markers
+        med = df.groupby("StatusGroupClean")["Rating"].median()
+        mean = df.groupby("StatusGroupClean")["Rating"].mean()
+        ax.plot(labels, med, marker="s", ms=6, lw=0, label="Median", color="black")
+        ax.plot(labels, mean, marker="D", ms=6, lw=0, label="Mean", color="black")
+
+    else:  # Box plot style with Seaborn
+        sns.boxplot(
+            data=df, x="StatusGroupClean", y="Rating", order=labels,
+            palette=palette, showmeans=True, notch=True, linewidth=1.5, ax=ax
+        )
+
+    # **REMOVE** the part that adds sample size (n) labels
+    # counts = df.groupby("StatusGroupClean")["Rating"].size()
+    # ymin, ymax = ax.get_ylim()
+    # for i, (label, n) in enumerate(counts.items(), start=1):
+    #     ax.text(i - 1, ymax + 0.08 * (ymax - ymin), f"n={n}",
+    #             ha="center", va="bottom", fontsize=8, color="black")
+
+    # Title, labels, and grid adjustments
+    ax.set_title(title, fontsize=10, loc="left", pad=15)
+    ax.set_xlabel("")
+    ax.set_ylabel("Rating", fontsize=9)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    # Adjust x-tick labels for better readability
+    plt.xticks(rotation=45, ha="right")
+
+    fig.tight_layout()
+
+    # Save the figure
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    if export_also:
+        base, _ = os.path.splitext(out_path)
+        alt = os.path.join(os.path.dirname(out_path), f"{os.path.basename(base)}.{export_also}")
+        fig.savefig(alt, dpi="figure", bbox_inches="tight")
+
     plt.close(fig)
 
 
-# Data sanitization
-_PLACEHOLDER_END_DATES = {"9999-12-31", "9999/12/31"}
+def fig_scatter_yearsactive_vs_rating(d: pd.DataFrame, out_path: str) -> None:
+    # Remove rows with missing values
+    dd = d.dropna(subset=["YearsActive", "Rating"]).copy()
+    if dd.empty: return
 
-def sanitize_dates(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove placeholder end dates"""
-    df = df.copy()
-    if "End date" in df.columns:
-        mask_placeholder = df["End date"].astype(str).isin(_PLACEHOLDER_END_DATES)
-        if mask_placeholder.any():
-            df.loc[mask_placeholder, "End date"] = np.nan
-            logging.info(f"Sanitized placeholder End date rows: {int(mask_placeholder.sum())}")
-    return df
+    x, y = dd["YearsActive"].values, dd["Rating"].values
+
+    # Create figure with a larger size for clarity
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Adjust the number of points to make the scatter less dense
+    # Apply a transparency level (alpha) and adjust the size (s) for clarity
+    ax.scatter(x, y, s=10, alpha=0.5, edgecolor="none", c='blue', label='Data points')
+
+    # Perform linear fit if there are enough points
+    if x.size >= 2:
+        k, b = np.polyfit(x, y, 1)  # Linear fit
+        xx = np.linspace(x.min(), x.max(), 200)
+        ax.plot(xx, k*xx + b, linewidth=2, linestyle="--", color='red', label=f"Fit: y={k:.2f}x + {b:.2f}")
+
+        # Calculate R² for the fit
+        y_pred = k*x + b
+        ss_res = np.sum((y - y_pred)**2)
+        ss_tot = np.sum((y - y.mean())**2) if x.size > 1 else np.nan
+        r2 = 1 - ss_res/ss_tot if ss_tot and np.isfinite(ss_tot) else np.nan
+        ax.legend(loc="lower left", frameon=False, title=f"R² = {r2:.3f}")
+
+    # Set axis labels and title
+    ax.set_xlabel("Years Active (years)", fontsize=12)
+    ax.set_ylabel("Rating", fontsize=12)
+    ax.set_title("Years Active vs Rating (with linear fit)", fontsize=14)
+
+    # Increase font size for readability in journals
+    plt.xticks(fontsize=10)
+    plt.yticks(fontsize=10)
+
+    # Save the plot
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300)  # Save at high resolution
+    plt.close(fig)
+
+def fig_avg_rating_by_network_top10(d: pd.DataFrame, out_path: str, top_n_by_count: int = 10, min_n: int = 5):
+    dd = d.copy()
+    dd["Network"] = dd["Network"].fillna("").replace("", "Unknown")
+    counts = dd["Network"].value_counts()
+    cand = counts.head(top_n_by_count).index.tolist()
+    rows = []
+    for net in cand:
+        x = dd.loc[dd["Network"] == net, "Rating"].dropna().values
+        if x.size >= min_n:
+            m, lo, hi = _bootstrap_ci_mean(x)
+            rows.append((net, m, lo, hi, x.size))
+    if not rows:
+        return
+
+    tbl = pd.DataFrame(rows, columns=["Network","Mean","Low","High","n"]).sort_values("Mean", ascending=True)
+
+    # === 美化部分 ===
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+
+    y = np.arange(len(tbl))
+    colors = plt.cm.Blues(np.linspace(0.45, 0.85, len(tbl)))  # 柔和蓝色梯度
+
+    ax.barh(y, tbl["Mean"], color=colors, edgecolor="none", height=0.6)
+    xerr = np.vstack([tbl["Mean"] - tbl["Low"], tbl["High"] - tbl["Mean"]])
+    ax.errorbar(tbl["Mean"], y, xerr=xerr, fmt="none", ecolor="#333333", elinewidth=1.0, capsize=3)
+
+    # 去掉 n 信息，只显示 Network 名称
+    ax.set_yticks(y, labels=tbl["Network"])
+
+    ax.set_xlabel("Average Rating", fontsize=11)
+    ax.set_title("Average Rating by Network (Top 10 by representation)", fontsize=12, weight="bold", pad=10)
+
+    # 去掉上右边框，更专业
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+
+    # 调整网格和风格
+    ax.grid(axis="x", linestyle="--", linewidth=0.5, color="gray", alpha=0.4)
+    ax.yaxis.grid(False)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+def fig_platform_type_share(d: pd.DataFrame, out_path: str) -> None:
+    cnt = d["PlatformType"].value_counts()
+    if cnt.empty: return
+    share = (cnt / cnt.sum() * 100).sort_values(ascending=True)
+    fig, ax = plt.subplots(figsize=(6.6, 4.2))
+    y = np.arange(len(share))
+    ax.barh(y, share.values, height=0.7, edgecolor="#222222", linewidth=0.8, alpha=0.9)
+    ax.set_yticks(y, labels=share.index.tolist())
+    ax.set_xlim(0, max(share.values.max()*1.15, 10))
+    for i, v in enumerate(share.values):
+        ax.text(v + max(share.values)*0.01, i, f"{v:.1f}%", va="center", ha="left", fontsize=9)
+    ax.set_xlabel("Share of Shows (%)")
+    ax.set_title("PlatformType Share (Streamer/Broadcast/Cable-Premium/Other)")
+    fig.savefig(out_path); plt.close(fig)
+
+def fig_new_shows_by_year(d: pd.DataFrame, out_path: str) -> None:
+    s = d["YearFirst"].dropna().astype(int).value_counts().sort_index()
+    if s.empty: return
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    ax.bar(s.index.values, s.values, width=0.85, edgecolor="#222222", linewidth=0.6, alpha=0.9)
+    ax.set_xlabel("YearFirst")
+    ax.set_ylabel("Number of New Shows")
+    ax.set_title("New Shows by Year (YearFirst)")
+    fig.savefig(out_path); plt.close(fig)
 
 
-# Main visualization function
-def run(csv_path: str, save_dir: str, topk: int = 20) -> None:
+# -------------------------
+# 统一入口：生成与 LaTeX 对齐的 7 张图
+# -------------------------
+def run(csv_path: str, out_dir: str = "figures") -> None:
     setup_logging()
-    logging.info("=" * 60)
-    logging.info("TVMaze Data Visualization (Nature Color) Started")
-    logging.info(f"Input: {csv_path}, Output: {save_dir}")
-
     configure_matplotlib()
-    ensure_dir(save_dir)
+    ensure_dir(out_dir)
 
     df = read_csv(csv_path)
+    df = derive_variables(df)
 
-    expected_cols = ["Rating", "Title", "Genres", "Status", "First air date", "Network", "End date"]
-    for c in expected_cols:
-        if c not in df.columns:
-            logging.warning(f"Column '{c}' not found in dataset; filling with default.")
-            df[c] = np.nan
+    # 1. Ratings distribution
+    fig_rating_hist(df, os.path.join(out_dir, "fig_rating_hist.png"))
 
-    df["Rating"] = pd.to_numeric(df.get("Rating"), errors="coerce")
-    df = sanitize_dates(df)
+    # 2. Average rating by (provided) genre - Top12 by frequency
+    fig_avg_rating_by_genre(df, os.path.join(out_dir, "fig_avg_rating_by_genre.png"), top_n=12, min_n=5)
 
-    logging.info(f"Dataset: {len(df)} rows; rows with rating: {df['Rating'].notna().sum()}, "
-                 f"Avg rating: {df['Rating'].mean():.2f}")
+    # 3. Ratings by status (boxplot with normalized StatusGroup)
+    fig_box_rating_by_status(df, os.path.join(out_dir, "fig_box_rating_by_status.png"))
 
-    fig_top_rated(df, k=topk, save_path=os.path.join(save_dir, f"top_{topk}_rated.png"))
-    fig_rating_hist(df, bins=20, save_path=os.path.join(save_dir, "rating_hist.png"))
-    fig_status_mean_rating(df, save_path=os.path.join(save_dir, "status_mean_rating.png"))
-    fig_genre_mean_rating(df, topn=10, save_path=os.path.join(save_dir, "genre_mean_top10.png"), min_count=5)
-    fig_year_counts(df, save_path=os.path.join(save_dir, "year_counts.png"))
-    fig_network_topn(df, topn=15, save_path=os.path.join(save_dir, "network_top15.png"))
-    fig_genre_boxplot(df, topk_genres=6, save_path=os.path.join(save_dir, "genre_boxplot_top6.png"))
-    fig_platform_mean_rating(df, save_path=os.path.join(save_dir, "platform_mean_rating.png"))
+    # 4. Years active vs rating (with linear fit)
+    fig_scatter_yearsactive_vs_rating(df, os.path.join(out_dir, "fig_scatter_yearsactive_vs_rating.png"))
 
-    logging.info(f"SUCCESS: All visualizations saved to {save_dir}")
-    logging.info("=" * 60)
+    # 5. Average rating by network (top-10 by representation)
+    fig_avg_rating_by_network_top10(df, os.path.join(out_dir, "fig_avg_rating_by_network_top10.png"), top_n_by_count=10, min_n=5)
+
+    # 6. PlatformType share (Streamer/Broadcast/Cable-Premium/Other)
+    fig_platform_type_share(df, os.path.join(out_dir, "fig_platform_type_share.png"))
+
+    # 7. New shows over time (cohorts by first air year)
+    fig_new_shows_by_year(df, os.path.join(out_dir, "fig_new_shows_by_year.png"))
+
+
+# CLI
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Produce publication-quality figures matching the LaTeX file names.")
+    ap.add_argument("--csv", required=True, help="Path to your_name+id.csv")
+    ap.add_argument("--outdir", default="figures", help="Output directory for figures")
+    args = ap.parse_args()
+    run(args.csv, args.outdir)
