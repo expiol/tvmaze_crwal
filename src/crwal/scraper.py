@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
-
+from datetime import datetime, date
+from src.crwal.Visualization import Visualization
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -49,8 +50,8 @@ DEFAULT_START_PAGE = 1
 DEFAULT_END_PAGE = 3344  # TVMaze 总页数（截至2025年）
 
 # 请求节流与重试配置（已在util.py中统一管理）
-SLEEP_RANGE = (0.2, 0.8)  # 已弃用，使用Config.MIN_INTERVAL
-MAX_RETRIES = 2  # 已弃用，使用Config.MAX_RETRY
+SLEEP_RANGE = (0.2, 0.8)
+MAX_RETRIES = 2
 
 
 # -------------------------
@@ -95,6 +96,7 @@ def _text(node: Optional[Tag]) -> Optional[str]:
     if not node:
         return None
     return node.get_text(strip=True)
+
 def _non_empty(val: Any) -> bool:
     if val is None:
         return False
@@ -178,27 +180,8 @@ def extract_summary(soup: BeautifulSoup, title: Optional[str]) -> Optional[str]:
 
     return None
 
-
-def _safe_normalize_date(date_str: Optional[str]) -> Optional[str]:
-    if not date_str:
-        return None
-    try:
-        return normalize_date(date_str)
-    except Exception:
-        return date_str
-
 def _norm_label(s: str) -> str:
     return re.sub(r":\s*$", "", s or "", flags=re.I).strip().lower()
-
-def _select_one_with_classes(parent: Tag, classes: List[str]) -> Optional[Tag]:
-    """
-    在 parent 下查找包含 classes 中所有类名的第一个元素。
-    """
-    for el in parent.find_all(True):
-        cl = set(el.get("class") or [])
-        if set(classes).issubset(cl):
-            return el
-    return None
 
 
 # -------------------------
@@ -252,8 +235,8 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
             strong = div.find("strong")
             if not strong or not strong.text:
                 continue
-            label = _norm_label(strong.text)  
-            if label in ("network", "web channel", "webchannel"):  
+            label = _norm_label(strong.text)
+            if label in ("network", "web channel", "webchannel"):
                 a = div.find("a", href=True)
                 network = _text(a)
                 if network:
@@ -261,7 +244,6 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
         if not network:
             net_a = info_panel.select_one('a[href^="/networks/"], a[href^="/webchannels/"]')
             network = _text(net_a)
-
 
     # Status  通用解析：在包含 <strong>Label:</strong> 的同辈元素中取值
     status = None
@@ -274,7 +256,6 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
             # 取 strong 所在父块的纯文本，去掉 label 前缀
             full_txt = div.get_text(" ", strip=True)
             val = re.sub(re.escape(strong.text), "", full_txt, count=1).strip()
-            # 有些行后面跟括号/额外字段，这里对 Network 已单独处理，不在此处理
             if label == "status":
                 status = val or status
 
@@ -288,13 +269,12 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
                 genres_container = div
                 break
         if genres_container:
-            items = [ _text(x) for x in genres_container.select(".divider span") ]
+            items = [_text(x) for x in genres_container.select(".divider span")]
             items = _clean_list(items)
             if items:
                 genres = format_genres(items)
 
     summary = extract_summary(soup, title)
-
 
     return {
         "Title": title,
@@ -305,9 +285,6 @@ def parse_show_detail_page(html: str) -> Dict[str, Optional[str]]:
         "Summary": summary,
     }
 
-
-from datetime import datetime, date
-import re
 
 # 英文月份日期，严格匹配，如 "Oct 30, 2025"
 _DATE_RE = re.compile(r"^[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}$")
@@ -331,7 +308,7 @@ def parse_episodes_page(html: str) -> Tuple[Optional[str], Optional[str]]:
     解析剧集页，返回 (first_air_date, end_date)：
     - 跳过 Specials
     - 只接受严格的 'Mon DD, YYYY' 日期
-    - 如需只统计已播出，可开启过滤未来日期
+    - 过滤未来日期
     """
     soup = _soup(html)
     dates: List[str] = []
@@ -365,7 +342,6 @@ def parse_episodes_page(html: str) -> Tuple[Optional[str], Optional[str]]:
         return (None, None)
 
     return (min(dates), max(dates))
-
 
 
 # -------------------------
@@ -405,7 +381,7 @@ def _gather_all_show_urls(
     failed_pages: List[int] = []
 
     logging.info(f"Starting to gather show URLs from {len(pages)} listing pages...")
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(fetch_listing_urls, session, p): p for p in pages}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Listing pages"):
@@ -419,17 +395,17 @@ def _gather_all_show_urls(
 
     # 去重并保持顺序
     all_urls = list(dict.fromkeys(all_urls))
-    
+
     # 汇总统计
     success_rate = ((len(pages) - len(failed_pages)) / len(pages) * 100) if pages else 0
     logging.info(
         f"Collected {len(all_urls)} unique show URLs from pages {start_page}..{end_page} "
         f"(success rate: {success_rate:.1f}%, failed pages: {len(failed_pages)})"
     )
-    
+
     if failed_pages and len(failed_pages) <= 10:
         logging.info(f"Failed pages: {failed_pages}")
-    
+
     return all_urls
 
 
@@ -441,7 +417,7 @@ def _process_single_show(session: requests.Session, show_url: str) -> Optional[S
         if not detail:
             logging.debug(f"[Show] No detail data for {show_url}")
             return None
-        
+
         # 抓取剧集页
         episodes_url = _episodes_url_from_show_url(show_url)
         first_date, end_date = fetch_episodes_dates(session, episodes_url)
@@ -509,6 +485,97 @@ def transform_from_web(
         df = df[completeness_mask].copy()
     return df
 
+
+def transform_until_limit(
+    limit: int,
+    start_page: int = DEFAULT_START_PAGE,
+    max_pages: int = DEFAULT_END_PAGE,
+    max_workers: Optional[int] = None,
+) -> pd.DataFrame:
+    if limit <= 0:
+        return pd.DataFrame(columns=COLUMNS)
+
+    session = get_session()
+    seen_urls: set[str] = set()
+    kept_frames: List[pd.DataFrame] = []
+    total_kept = 0
+
+    page = start_page
+    while page <= max_pages and total_kept < limit:
+        # 1) 列表页 -> 当页的 show urls（去重）
+        try:
+            page_urls = fetch_listing_urls(session, page)
+        except Exception as e:
+            logging.warning(f"[Listing] page={page} failed: {type(e).__name__}: {e}")
+            page += 1
+            continue
+
+        page_urls = [u for u in page_urls if u not in seen_urls]
+        for u in page_urls:
+            seen_urls.add(u)
+
+        if not page_urls:
+            logging.info(f"[Listing] page={page} has no new show URLs (all seen or empty).")
+            page += 1
+            continue
+
+        # 2) 并发处理当页的 shows
+        records: List[ShowRecord] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(_process_single_show, session, url): url for url in page_urls}
+            for fut in as_completed(futures):
+                url = futures[fut]
+                try:
+                    rec = fut.result()
+                    if rec:
+                        records.append(rec)
+                except Exception as e:
+                    logging.warning(f"[Detail/Episodes] {url} failed: {e}")
+
+        # 3) 当页转 DataFrame + 过滤完整性
+        if not records:
+            logging.info(f"[Page {page}] no valid records parsed.")
+            page += 1
+            continue
+
+        df_page = pd.DataFrame([r.to_row() for r in records])
+
+        for col in COLUMNS:
+            if col not in df_page.columns:
+                df_page[col] = None
+        df_page = df_page[COLUMNS]
+        df_page["Summary"] = df_page["Summary"].apply(lambda x: truncate(x, 2000) if isinstance(x, str) else x)
+
+        completeness_mask = df_page[COLUMNS].apply(lambda s: s.map(_non_empty)).all(axis=1)
+        df_kept = df_page[completeness_mask].copy()
+        dropped = len(df_page) - len(df_kept)
+        if dropped:
+            logging.info(f"[Page {page}] dropped {dropped} rows due to 8-field completeness.")
+
+        if not df_kept.empty:
+            kept_frames.append(df_kept)
+            total_kept += len(df_kept)
+            logging.info(f"[Progress] page={page}, kept_this_page={len(df_kept)}, total_kept={total_kept}/{limit}")
+
+        # 4) 是否已达上限
+        if total_kept >= limit:
+            break
+
+        page += 1
+
+    if not kept_frames:
+        return pd.DataFrame(columns=COLUMNS)
+
+    df_all = pd.concat(kept_frames, ignore_index=True)
+
+    df_all = df_all.drop_duplicates(subset=["Title", "Network", "First air date"], keep="first").reset_index(drop=True)
+
+    if len(df_all) > limit:
+        df_all = df_all.iloc[:limit].copy()
+
+    return df_all
+
+
 # -------------------------
 # Entrypoint
 # -------------------------
@@ -519,17 +586,31 @@ def run(
     end_page: int = DEFAULT_END_PAGE,
     log_file: str = None,
     max_workers: int = None,
+    limit: Optional[int] = None,   
 ) -> pd.DataFrame:
     setup_logging(log_file)
     logging.info("=" * 60)
     logging.info("TVMaze Scraper (HTML) Started")
-    logging.info(f"Parameters: range={start_page}..{end_page}, output={out_path}")
 
-    if start_page < 1 or end_page < start_page:
-        raise ValueError("Invalid page range")
+    logging.info(f"Parameters: mode=limit, start_page={start_page}, limit={limit}, output={out_path}")
+    if start_page < 1 or start_page > DEFAULT_END_PAGE:
+        raise ValueError("Invalid start_page")
 
-    df = transform_from_web(start_page=start_page, end_page=end_page, max_workers=max_workers)
+    df = transform_until_limit(
+        limit=limit,
+        start_page=start_page,
+        max_pages=DEFAULT_END_PAGE,
+        max_workers=max_workers,
+    )
+    
     save_csv(df, out_path)
     logging.info(f"SUCCESS: Saved {len(df)} rows to {out_path}")
+
+    if df.empty:
+        logging.warning("[Visualization] DataFrame is empty, skip plotting.")
+    else:
+        Visualization(csv_path=out_path, out_dir="figures")
+
     logging.info("=" * 60)
     return df
+
